@@ -2,7 +2,23 @@
   "name": "dsh-recent-tabs",
   "description": "Recent-session tab strip for the DSH Web GUI: a hover-revealed bar at the top edge listing every session you opened, switch by click, remove with the close button, state kept in browser storage.",
   "version": "0.1.0",
-  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/smwyylc/dsh-recent-tabs.git"
+  },
+  "homepage": "https://github.com/smwyylc/dsh-recent-tabs",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "dsh",
+    "recent-tabs",
+    "session-tabs",
+    "favorites",
+    "web-ui"
+  ],
+  "engines": {
+    "dsh": ">=0.2.0-rc.2 <0.3.0-0"
+  },
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -59,7 +75,8 @@
     "cordis.patch.yml",
     "README.md",
     "README.zh.md",
-    "README.i18n.yaml"
+    "README.i18n.yaml",
+    "LICENSE"
   ],
   "license": "BSD-3-Clause"
 }

@@ -120,8 +120,16 @@ DSH Web GUI 的「最近打开」会话 Tab 条，形态参照浏览器标签页
 
 ## 安装
 
+从 npm 安装，或从任何收录了它的插件市场安装：
+
 ```sh
-dsh plugin --profile web add link:<repo>/packages/dsh-recent-tabs
+dsh plugin --profile web add dsh-recent-tabs
+```
+
+或从源码目录作为本地 bundle 安装：
+
+```sh
+dsh plugin --profile web add link:<repo>/my-plugins/dsh-recent-tabs
 ```
 
 随后重启该 profile，让 Host 半区注册。
