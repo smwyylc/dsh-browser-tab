@@ -485,12 +485,44 @@ describe('tab rename', () => {
       input.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await act(async () => {
-      // React listens for focusout at the root; dispatch the bubbling form.
+      // A real dismissal: blur() hands focus to <body> and jsdom raises the
+      // native blur/focusout pair from there, which is the one route React's
+      // onBlur listens to. Do not also dispatch a hand-made focusout - that
+      // would commit the same draft twice.
+      input.blur()
+      await Promise.resolve()
+    })
+
+    expect(document.activeElement).not.toBe(input)
+    expect(rename).toHaveBeenCalledTimes(1)
+    expect(rename).toHaveBeenCalledWith('Blurred')
+  })
+
+  it('ignores a blur whose focus never left the editor', async () => {
+    const { ctx, rename } = fakeSessions({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
+    const controller = new RecentTabsController(memoryStorage())
+    render(createElement(RecentTabs, { controller, ctx: ctx as never }))
+
+    act(() => { controller.record('s1', 'Alpha') })
+    act(() => { tabByText('Alpha').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })
+
+    const input = host.querySelector<HTMLInputElement>('input')!
+    act(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(input, 'Ghost')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      // The shell re-fires blur a few frames after focus lands, without moving
+      // the caret: activeElement is still the editor, so this is the spurious
+      // shape, not a dismissal. The editor must stay open and keep the name.
       input.dispatchEvent(new FocusEvent('focusout', { bubbles: true }))
       await Promise.resolve()
     })
 
-    expect(rename).toHaveBeenCalledWith('Blurred')
+    expect(document.activeElement).toBe(input)
+    expect(rename).not.toHaveBeenCalled()
+    expect(host.querySelector('input')).toBe(input)
   })
 
   it('ignores double-click on a session that is no longer listed', () => {

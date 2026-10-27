@@ -112,6 +112,15 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
 - **开合状态是纯 UI 状态**：按钮在条内、抽屉在另一处 slot 注册，共享 `fav-drawer-state.ts` 的模块级
   observable（`isFavoritesOpen` / `setFavoritesOpen` / `toggleFavoritesOpen` / `subscribeFavoritesOpen`），
   **不落盘**、不进 `store.ts`。抽屉关着时 `return null`，不留隐藏 DOM。
+- **外壳会补发伪 blur，行内编辑器的 `onBlur` 必须先验焦点**：真实 GUI 里元素获得焦点后约
+  60-110ms，外壳会补发一个 `blur` / `focusout`，但焦点根本没移动（触发时
+  `document.activeElement` 仍是那个 input，也没有元素接手焦点，普通 DOM input 与 React 元素
+  一样中招）；条子与抽屉里都会收到。所以「`onBlur` 就提交/收起」的行内编辑器会在打开后约
+  60ms 自己关掉。修法是在 `onBlur` 开头先判断 `if (document.activeElement === event.target) return`，
+  再决定提交还是关闭（守卫在 `RecentTabs.tsx` 的 tab 重命名与 `FavoritesPanel.tsx` 的文件夹
+  重命名两处）。真实点到外面时焦点会真的移走（变成被点元素或 body），守卫不生效，「点外面提交」
+  的语义不变；因此测试里模拟「点到外面」不能只发合成 `focusout`（那不会移焦点，会被守卫正确
+  拦下），要先真的把焦点移走——jsdom 里 `input.blur()` 会把 `activeElement` 变成 body。
 - **条子的边框与投影只取轻一档**：`.bar` 保持「从屏幕顶缘挂下来」——`border-top: none`、只有底部
   `9px` 圆角、`padding: 6px 10px`（整条约 41px），不要改成四边带框的卡片。边线
   `1px solid var(--dsw-alias-border-l2, ...)`（l1 在浅色下死灰、深色下几乎消失），投影 blur ≤ 20px、
