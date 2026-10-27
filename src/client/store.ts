@@ -7,6 +7,11 @@
  * now", a favorite is "kept for later". Closing a tab therefore never touches
  * the favorites collection, and pinning a session never reorders the strip.
  *
+ * Favorites are a tree rather than a flat list, the way a bookmark manager has
+ * folders: `favorites` is its top layer, and a folder is a node that holds
+ * bookmark rows and other folders. Every operation here is a function of that
+ * tree and returns its input reference when nothing changed.
+ *
  * Pure and framework-free on purpose — every mutation is a plain function over
  * the two lists so the behaviour is locked by unit tests without React or a
  * live GUI. The React surface only reads this store through subscribe().
@@ -49,10 +54,45 @@ export interface FavoriteEntry {
   title: string
 }
 
+/**
+ * A folder on the favorites tree, the way a browser's bookmark manager has
+ * them: it holds bookmark rows and other folders, and it has no session of its
+ * own. A folder is a container, never a second copy of a bookmark.
+ */
+export interface FavoriteFolder {
+  /** Folder identity, generated here (`fav-folder-*`); never a session id. */
+  id: string
+  /** Name shown on the folder row. */
+  title: string
+  /** Nested nodes, in display order. */
+  children: FavoriteNode[]
+}
+
+/** One node of the favorites tree: a bookmark row or a folder. */
+export type FavoriteNode = FavoriteEntry | FavoriteFolder
+
+/**
+ * Whether a node is a folder.
+ *
+ * `children` is the one field a folder has that a bookmark row never does, and
+ * every node this module produces comes from `readFavoriteRow`, so the check is
+ * exact for stored and freshly built data alike.
+ * @param node - one tree node.
+ * @returns true when the node is a folder.
+ */
+export function isFolder(node: FavoriteNode): node is FavoriteFolder {
+  return 'children' in node
+}
+
 /** Both persisted collections, as one record. */
 export interface Ledger {
   readonly tabs: readonly RecentTab[]
-  readonly favorites: readonly FavoriteEntry[]
+  /**
+   * The root layer of the favorites tree: bookmark rows and folders side by
+   * side. The field name predates folders and stays — every consumer reads the
+   * tree from here.
+   */
+  readonly favorites: readonly FavoriteNode[]
 }
 
 /** Result of reading the persisted text. */
@@ -99,12 +139,55 @@ function readRow(row: unknown, seen: Set<string>): RecentTab | undefined {
 }
 
 /**
+ * Validate one stored favorites row, recursing into folders.
+ *
+ * A folder is recognised by a `children` array and validated depth-first; a row
+ * without one is a bookmark. The `seen` set spans the whole tree, so the same id
+ * cannot appear twice even across different folders. A malformed node is
+ * dropped on its own — a bad child never takes its folder down with it.
+ * @param row - one raw node.
+ * @param seen - ids already accepted anywhere in the tree, mutated in place.
+ * @returns the normalized node, or undefined when it must be dropped.
+ */
+function readFavoriteRow(row: unknown, seen: Set<string>): FavoriteNode | undefined {
+  if (typeof row !== 'object' || row === null) return undefined
+  const id = (row as { id?: unknown }).id
+  if (typeof id !== 'string' || id === '' || seen.has(id)) return undefined
+  seen.add(id)
+  const title = (row as { title?: unknown }).title
+  const label = typeof title === 'string' && title !== '' ? title : shortId(id)
+  const children = (row as { children?: unknown }).children
+  if (!Array.isArray(children)) return { id, title: label }
+  const kept: FavoriteNode[] = []
+  for (const child of children) {
+    const node = readFavoriteRow(child, seen)
+    if (node !== undefined) kept.push(node)
+  }
+  return { id, title: label, children: kept }
+}
+
+/**
+ * Normalize the whole favorites layer (root, then every folder below it).
+ * @param rows - raw favorite nodes.
+ * @returns the validated tree.
+ */
+function readFavorites(rows: readonly unknown[]): FavoriteNode[] {
+  const seen = new Set<string>()
+  const kept: FavoriteNode[] = []
+  for (const row of rows) {
+    const node = readFavoriteRow(row, seen)
+    if (node !== undefined) kept.push(node)
+  }
+  return kept
+}
+
+/**
  * Normalize the current shape's two arrays independently.
  *
  * They are deduped one by one, not against each other: the same session is
  * usually both an open tab and a bookmark, and that is not a duplicate.
  * @param tabs - raw tab rows.
- * @param favorites - raw favorite rows.
+ * @param favorites - raw favorite nodes (the root layer of the tree).
  * @returns the normalized ledger.
  */
 function readCurrent(tabs: readonly unknown[], favorites: readonly unknown[]): Ledger {
@@ -115,13 +198,7 @@ function readCurrent(tabs: readonly unknown[], favorites: readonly unknown[]): L
     const entry = readRow(row, tabSeen)
     if (entry !== undefined) keptTabs.push(entry)
   }
-  const favoriteSeen = new Set<string>()
-  const keptFavorites: FavoriteEntry[] = []
-  for (const row of favorites) {
-    const entry = readRow(row, favoriteSeen)
-    if (entry !== undefined) keptFavorites.push(entry)
-  }
-  return { tabs: keptTabs, favorites: keptFavorites }
+  return { tabs: keptTabs, favorites: readFavorites(favorites) }
 }
 
 /**
@@ -250,61 +327,486 @@ export function moveTab(
 }
 
 /**
+ * Find a bookmark by session id anywhere in the tree.
+ *
+ * The drawer and the strip both need "is this session pinned?" without caring
+ * which folder holds it, so this walks folders as well as the root layer.
+ * @param nodes - the favorites layer to search.
+ * @param id - the session id.
+ * @returns the bookmark row, or undefined when the session is not pinned.
+ */
+export function findFavorite(
+  nodes: readonly FavoriteNode[],
+  id: string,
+): FavoriteEntry | undefined {
+  for (const node of nodes) {
+    if (isFolder(node)) {
+      const nested = findFavorite(node.children, id)
+      if (nested !== undefined) return nested
+      continue
+    }
+    if (node.id === id) return node
+  }
+  return undefined
+}
+
+/**
+ * Find a folder by id anywhere in the tree.
+ * @param nodes - the favorites layer to search.
+ * @param id - the folder id.
+ * @returns the folder, or undefined when no folder carries that id.
+ */
+function findFolder(nodes: readonly FavoriteNode[], id: string): FavoriteFolder | undefined {
+  for (const node of nodes) {
+    if (!isFolder(node)) continue
+    if (node.id === id) return node
+    const nested = findFolder(node.children, id)
+    if (nested !== undefined) return nested
+  }
+  return undefined
+}
+
+/**
+ * The layer (sibling list) that holds one node.
+ *
+ * Returned by reference: the root layer comes back as the very array that was
+ * passed in, which is how callers tell a root move from a nested one.
+ * @param nodes - the favorites layer to search.
+ * @param id - the node id.
+ * @returns the containing layer, or undefined when the id is not in the tree.
+ */
+function layerOf(nodes: readonly FavoriteNode[], id: string): readonly FavoriteNode[] | undefined {
+  if (nodes.some(node => node.id === id)) return nodes
+  for (const node of nodes) {
+    if (!isFolder(node)) continue
+    const found = layerOf(node.children, id)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/**
+ * Replace one children array with a new one, rebuilding only the path to it.
+ * @param nodes - the layer being rebuilt.
+ * @param layer - the children array to swap.
+ * @param next - its replacement.
+ * @returns the rebuilt layer, the SAME reference when the array is not here.
+ */
+function replaceChildren(
+  nodes: readonly FavoriteNode[],
+  layer: readonly FavoriteNode[],
+  next: FavoriteNode[],
+): FavoriteNode[] {
+  const kept: FavoriteNode[] = []
+  let changed = false
+  for (const node of nodes) {
+    if (!isFolder(node)) {
+      kept.push(node)
+      continue
+    }
+    if (node.children === layer) {
+      changed = true
+      kept.push({ ...node, children: next })
+      continue
+    }
+    const nested = replaceChildren(node.children, layer, next)
+    if (nested === node.children) {
+      kept.push(node)
+      continue
+    }
+    changed = true
+    kept.push({ ...node, children: nested })
+  }
+  return changed ? kept : nodes as FavoriteNode[]
+}
+
+/**
+ * Rebuild one folder, keeping every other node by reference.
+ *
+ * The patch returns the same folder to mean "nothing to change", which is what
+ * lets the callers hand back their input reference for a no-op.
+ * @param nodes - the layer being searched.
+ * @param id - the folder to patch.
+ * @param patch - produces the replacement folder, or undefined for no change.
+ * @returns the rebuilt layer plus whether anything changed.
+ */
+function updateFolder(
+  nodes: readonly FavoriteNode[],
+  id: string,
+  patch: (folder: FavoriteFolder) => FavoriteFolder | undefined,
+): { next: FavoriteNode[]; changed: boolean } {
+  let changed = false
+  const kept: FavoriteNode[] = []
+  for (const node of nodes) {
+    if (!isFolder(node)) {
+      kept.push(node)
+      continue
+    }
+    if (node.id === id) {
+      const patched = patch(node)
+      if (patched === undefined) {
+        kept.push(node)
+        continue
+      }
+      changed = true
+      kept.push(patched)
+      continue
+    }
+    const nested = updateFolder(node.children, id, patch)
+    if (!nested.changed) {
+      kept.push(node)
+      continue
+    }
+    changed = true
+    kept.push({ ...node, children: nested.next })
+  }
+  return changed
+    ? { next: kept, changed: true }
+    : { next: nodes as FavoriteNode[], changed: false }
+}
+
+/**
+ * Remove a bookmark row from wherever it sits.
+ * @param nodes - the layer being searched.
+ * @param id - the session id to drop.
+ * @returns the rebuilt tree, plus the removed row when it was found.
+ */
+function removeFavoriteRow(
+  nodes: readonly FavoriteNode[],
+  id: string,
+): { next: FavoriteNode[]; removed: FavoriteEntry | undefined } {
+  let removed: FavoriteEntry | undefined
+  const kept: FavoriteNode[] = []
+  for (const node of nodes) {
+    if (!isFolder(node)) {
+      if (node.id === id && removed === undefined) {
+        removed = node
+        continue
+      }
+      kept.push(node)
+      continue
+    }
+    const nested = removeFavoriteRow(node.children, id)
+    if (nested.removed === undefined) {
+      kept.push(node)
+      continue
+    }
+    removed = nested.removed
+    kept.push({ ...node, children: nested.next })
+  }
+  return removed === undefined
+    ? { next: nodes as FavoriteNode[], removed }
+    : { next: kept, removed }
+}
+
+/**
+ * Remove a folder and everything inside it.
+ * @param nodes - the layer being searched.
+ * @param id - the folder id.
+ * @returns the rebuilt tree, plus the removed folder when it was found.
+ */
+function removeFolderRow(
+  nodes: readonly FavoriteNode[],
+  id: string,
+): { next: FavoriteNode[]; removed: FavoriteFolder | undefined } {
+  let removed: FavoriteFolder | undefined
+  const kept: FavoriteNode[] = []
+  for (const node of nodes) {
+    if (!isFolder(node)) {
+      kept.push(node)
+      continue
+    }
+    if (node.id === id && removed === undefined) {
+      removed = node
+      continue
+    }
+    const nested = removeFolderRow(node.children, id)
+    if (nested.removed === undefined) {
+      kept.push(node)
+      continue
+    }
+    removed = nested.removed
+    kept.push({ ...node, children: nested.next })
+  }
+  return removed === undefined
+    ? { next: nodes as FavoriteNode[], removed }
+    : { next: kept, removed }
+}
+
+/** Monotonic suffix for folder ids; the tree is checked before it is used. */
+let folderSeq = 0
+
+/**
+ * A folder id nothing in the tree uses yet.
+ *
+ * The counter restarts on every page load, so the id is only provisional until
+ * the tree says otherwise — a saved `fav-folder-1` pushes the next new folder
+ * past it instead of colliding.
+ * @param nodes - the whole favorites tree.
+ * @returns an unused id.
+ */
+function nextFolderId(nodes: readonly FavoriteNode[]): string {
+  const taken = new Set<string>()
+  const collect = (layer: readonly FavoriteNode[]): void => {
+    for (const node of layer) {
+      taken.add(node.id)
+      if (isFolder(node)) collect(node.children)
+    }
+  }
+  collect(nodes)
+  let id = ''
+  do {
+    folderSeq += 1
+    id = `fav-folder-${folderSeq}`
+  } while (taken.has(id))
+  return id
+}
+
+/**
  * Add or remove one bookmark.
  *
- * Appends when the id is not bookmarked yet (a bookmark list keeps the order it
- * was built in), removes it otherwise. Tabs are a separate collection and are
- * never touched here.
- * @param favorites - current bookmark list.
+ * Appends to the root layer when the session is not bookmarked yet (a bookmark
+ * list keeps the order it was built in). When it IS bookmarked — at the root or
+ * inside a folder — that one row is removed, wherever it sits: "unpin" means
+ * "this bookmark is gone", and leaving a nested copy behind while adding a
+ * second root copy would list the same session twice. Tabs are a separate
+ * collection and are never touched here.
+ * @param favorites - current favorites tree.
  * @param id - session to pin or unpin.
  * @param title - title to store when pinning; defaults to the short id.
- * @returns the next list, the SAME reference when the id is empty.
+ * @returns the next tree, the SAME reference when the id is empty.
  */
 export function toggleFavorite(
-  favorites: readonly FavoriteEntry[],
+  favorites: readonly FavoriteNode[],
   id: string,
   title?: string,
-): FavoriteEntry[] {
-  if (id === '') return favorites as FavoriteEntry[]
-  const index = favorites.findIndex(entry => entry.id === id)
-  if (index >= 0) {
-    const next = favorites.slice()
-    next.splice(index, 1)
-    return next
-  }
+): FavoriteNode[] {
+  if (id === '') return favorites as FavoriteNode[]
+  const pinned = findFavorite(favorites, id)
+  if (pinned !== undefined) return removeFavoriteRow(favorites, id).next
   const nextTitle = title === undefined || title === '' ? shortId(id) : title
   return favorites.concat([{ id, title: nextTitle }])
 }
 
 /**
- * Move one bookmark before/after another.
+ * Move one bookmark or folder before/after a sibling.
  *
- * The drawer's vertical drag only ever reorders this list: the strip keeps its
- * own order and the activation order is not involved.
- * @param favorites - current bookmark list.
- * @param id - the entry being dragged.
- * @param targetId - the entry the drop landed on.
- * @param place - whether the dragged entry lands before or after the target.
- * @returns the next list; the SAME reference when the move is a no-op.
+ * Dragging inside the drawer only ever reorders the layer the source lives in:
+ * the target has to be a sibling, and a cross-layer drop is a no-op (the way to
+ * change layers is a drop on a folder). The strip keeps its own order and the
+ * activation order is not involved.
+ * @param favorites - current favorites tree.
+ * @param id - the node being dragged.
+ * @param targetId - the sibling the drop landed on.
+ * @param place - whether the dragged node lands before or after the target.
+ * @returns the next tree; the SAME reference when the move is a no-op.
  */
 export function moveFavorite(
-  favorites: readonly FavoriteEntry[],
+  favorites: readonly FavoriteNode[],
   id: string,
   targetId: string,
   place: 'before' | 'after',
-): FavoriteEntry[] {
-  if (id === targetId) return favorites as FavoriteEntry[]
-  const from = favorites.findIndex(entry => entry.id === id)
-  const to = favorites.findIndex(entry => entry.id === targetId)
-  if (from < 0 || to < 0) return favorites as FavoriteEntry[]
-  const next = favorites.slice()
+): FavoriteNode[] {
+  if (id === targetId) return favorites as FavoriteNode[]
+  const layer = layerOf(favorites, id)
+  if (layer === undefined) return favorites as FavoriteNode[]
+  const from = layer.findIndex(node => node.id === id)
+  const targetIndex = layer.findIndex(node => node.id === targetId)
+  if (from < 0 || targetIndex < 0) return favorites as FavoriteNode[]
+  const next = layer.slice()
   const [moved] = next.splice(from, 1)
-  const targetIndex = next.findIndex(entry => entry.id === targetId)
-  next.splice(place === 'before' ? targetIndex : targetIndex + 1, 0, moved)
-  if (next.every((entry, index) => entry.id === favorites[index].id)) {
-    return favorites as FavoriteEntry[]
+  const landing = next.findIndex(node => node.id === targetId)
+  next.splice(place === 'before' ? landing : landing + 1, 0, moved)
+  if (next.every((node, index) => node.id === layer[index].id)) {
+    return favorites as FavoriteNode[]
   }
-  return next
+  return layer === favorites ? next : replaceChildren(favorites, layer, next)
+}
+
+/**
+ * Result of creating a folder: the new tree and the folder itself.
+ *
+ * The folder is undefined only when the requested parent does not exist, in
+ * which case the tree comes back untouched.
+ */
+export interface CreatedFolder {
+  /** The next favorites tree (the input reference when nothing was created). */
+  readonly next: readonly FavoriteNode[]
+  /** The new folder, or undefined when its parent was missing. */
+  readonly folder: FavoriteFolder | undefined
+}
+
+/**
+ * Create an empty folder at the root or inside another folder.
+ * @param favorites - current favorites tree.
+ * @param parentId - the containing folder, or undefined for the root layer.
+ * @param title - the name to give it; a blank one falls back to the short id.
+ * @returns the new tree and the folder.
+ */
+export function createFolder(
+  favorites: readonly FavoriteNode[],
+  parentId: string | undefined,
+  title: string,
+): CreatedFolder {
+  if (parentId !== undefined && findFolder(favorites, parentId) === undefined) {
+    return { next: favorites, folder: undefined }
+  }
+  const id = nextFolderId(favorites)
+  const folder: FavoriteFolder = {
+    id,
+    title: title.trim() === '' ? shortId(id) : title.trim(),
+    children: [],
+  }
+  if (parentId === undefined) return { next: favorites.concat([folder]), folder }
+  const appended = updateFolder(favorites, parentId, parent => ({
+    ...parent,
+    children: parent.children.concat([folder]),
+  }))
+  return { next: appended.next, folder }
+}
+
+/**
+ * Rename one folder.
+ * @param favorites - current favorites tree.
+ * @param folderId - the folder to rename.
+ * @param title - the new name; blank means "leave it alone".
+ * @returns the next tree, the SAME reference when nothing changed.
+ */
+export function renameFolder(
+  favorites: readonly FavoriteNode[],
+  folderId: string,
+  title: string,
+): FavoriteNode[] {
+  const label = title.trim()
+  if (label === '') return favorites as FavoriteNode[]
+  return updateFolder(favorites, folderId, folder => (
+    folder.title === label ? undefined : { ...folder, title: label }
+  )).next
+}
+
+/**
+ * Delete one folder and everything inside it.
+ *
+ * Only a folder can be removed here: an id that names a bookmark row is left
+ * alone, because unpinning is `toggleFavorite`'s job. Tabs are a separate
+ * collection and are never touched.
+ * @param favorites - current favorites tree.
+ * @param folderId - the folder to drop.
+ * @returns the next tree, the SAME reference when no such folder exists.
+ */
+export function removeFolder(
+  favorites: readonly FavoriteNode[],
+  folderId: string,
+): FavoriteNode[] {
+  return removeFolderRow(favorites, folderId).next
+}
+
+/**
+ * Move one bookmark into a folder, appended last.
+ * @param favorites - current favorites tree.
+ * @param id - the session id being moved.
+ * @param folderId - the destination folder.
+ * @returns the next tree; the SAME reference when the folder is missing, the
+ * id is not a bookmark, or the row already sits last in that folder.
+ */
+export function moveFavoriteInto(
+  favorites: readonly FavoriteNode[],
+  id: string,
+  folderId: string,
+): FavoriteNode[] {
+  const target = findFolder(favorites, folderId)
+  if (target === undefined) return favorites as FavoriteNode[]
+  const entry = findFavorite(favorites, id)
+  if (entry === undefined) return favorites as FavoriteNode[]
+  const last = target.children[target.children.length - 1]
+  if (last !== undefined && last.id === id) return favorites as FavoriteNode[]
+  const detached = removeFavoriteRow(favorites, id)
+  const appended = updateFolder(detached.next, folderId, folder => ({
+    ...folder,
+    children: folder.children.concat([entry]),
+  }))
+  return appended.next
+}
+
+/**
+ * Move one folder into another folder, or back to the root layer.
+ *
+ * Cycle-safe: a folder cannot be moved into itself or into one of its own
+ * descendants, so the tree can never acquire a loop.
+ * @param favorites - current favorites tree.
+ * @param folderId - the folder being moved.
+ * @param parentFolderId - the destination folder, or undefined for the root.
+ * @returns the next tree; the SAME reference when the move is a no-op
+ * (missing folder, a cycle, or the folder already last in that layer).
+ */
+export function moveFolderInto(
+  favorites: readonly FavoriteNode[],
+  folderId: string,
+  parentFolderId: string | undefined,
+): FavoriteNode[] {
+  const source = findFolder(favorites, folderId)
+  if (source === undefined) return favorites as FavoriteNode[]
+  if (parentFolderId === undefined) {
+    const last = favorites[favorites.length - 1]
+    if (last !== undefined && last.id === folderId) return favorites as FavoriteNode[]
+  } else {
+    if (parentFolderId === folderId) return favorites as FavoriteNode[]
+    const target = findFolder(favorites, parentFolderId)
+    if (target === undefined) return favorites as FavoriteNode[]
+    // A descendant of the source would close a loop.
+    if (findFolder(source.children, parentFolderId) !== undefined) {
+      return favorites as FavoriteNode[]
+    }
+    const last = target.children[target.children.length - 1]
+    if (last !== undefined && last.id === folderId) return favorites as FavoriteNode[]
+  }
+  const detached = removeFolderRow(favorites, folderId)
+  const { removed } = detached
+  if (removed === undefined) return favorites as FavoriteNode[]
+  if (parentFolderId === undefined) return detached.next.concat([removed])
+  return updateFolder(detached.next, parentFolderId, folder => ({
+    ...folder,
+    children: folder.children.concat([removed]),
+  })).next
+}
+
+/**
+ * Move one folder next to an existing node, in that node's layer.
+ *
+ * A folder dropped on a row lands as a sibling of that row: inside the same
+ * layer that is an ordinary reorder, in another layer it makes the folder join
+ * that layer at that spot. A folder can never land inside its own subtree.
+ * @param favorites - current favorites tree.
+ * @param folderId - the folder being dragged.
+ * @param targetId - the node the drop landed on.
+ * @param place - whether the folder lands before or after the target.
+ * @returns the next tree; the SAME reference when the move is a no-op.
+ */
+export function moveFolder(
+  favorites: readonly FavoriteNode[],
+  folderId: string,
+  targetId: string,
+  place: 'before' | 'after',
+): FavoriteNode[] {
+  if (folderId === targetId) return favorites as FavoriteNode[]
+  const source = findFolder(favorites, folderId)
+  if (source === undefined) return favorites as FavoriteNode[]
+  const sourceLayer = layerOf(favorites, folderId)
+  const targetLayer = layerOf(favorites, targetId)
+  if (sourceLayer === undefined || targetLayer === undefined) return favorites as FavoriteNode[]
+  // The target sits inside the folder being moved: that would close a loop.
+  if (layerOf(source.children, targetId) !== undefined) return favorites as FavoriteNode[]
+  // Same layer is a plain sibling reorder, which is idempotent in place.
+  if (sourceLayer === targetLayer) return moveFavorite(favorites, folderId, targetId, place)
+  const detached = removeFolderRow(favorites, folderId)
+  const moved = detached.removed
+  if (moved === undefined) return favorites as FavoriteNode[]
+  const landing = layerOf(detached.next, targetId)
+  if (landing === undefined) return favorites as FavoriteNode[]
+  const index = landing.findIndex(node => node.id === targetId)
+  const next = landing.slice()
+  next.splice(place === 'before' ? index : index + 1, 0, moved)
+  return landing === detached.next ? next : replaceChildren(detached.next, landing, next)
 }
 
 /**

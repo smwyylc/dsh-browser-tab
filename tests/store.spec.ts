@@ -3,19 +3,29 @@ import {
   BACKUP_KEY,
   MAX_TABS,
   STORAGE_KEY,
+  createFolder,
   dropOrder,
+  findFavorite,
+  isFolder,
   loadLedger,
   moveFavorite,
+  moveFavoriteInto,
+  moveFolder,
+  moveFolderInto,
   moveTab,
   nextActiveAfterClose,
   parseLedger,
   recordTab,
+  removeFolder,
   removeTab,
+  renameFolder,
   saveLedger,
   shortId,
   toggleFavorite,
   touchOrder,
   type FavoriteEntry,
+  type FavoriteFolder,
+  type FavoriteNode,
   type RecentTab,
   type TabStorage,
 } from '../src/client/store.ts'
@@ -526,5 +536,298 @@ describe('moveFavorite', () => {
   it('does not mutate the list it was given', () => {
     moveFavorite(favorites, 'c', 'a', 'before')
     expect(favorites.map(entry => entry.id)).toEqual(['a', 'b', 'c'])
+  })
+})
+
+/** One bookmark row, so the trees below stay readable. */
+function item(id: string): FavoriteEntry {
+  return { id, title: id.toUpperCase() }
+}
+
+/** One folder, written out by hand so the cases do not depend on createFolder. */
+function folder(id: string, title: string, children: FavoriteNode[]): FavoriteFolder {
+  return { id, title, children }
+}
+
+/**
+ * a | f1{ b, f2{ c } } | d
+ *
+ * Three layers deep and mixed on purpose: a root bookmark, a folder whose last
+ * child is another folder, and a trailing root bookmark.
+ */
+function sample(): FavoriteNode[] {
+  return [
+    item('a'),
+    folder('f1', 'Work', [item('b'), folder('f2', 'Nested', [item('c')])]),
+    item('d'),
+  ]
+}
+
+/** Read the ids of one layer, for order assertions. */
+function ids(nodes: readonly FavoriteNode[]): string[] {
+  return nodes.map(node => node.id)
+}
+
+describe('favorites tree shape', () => {
+  it('narrows folders by their children array', () => {
+    expect(isFolder(item('a'))).toBe(false)
+    expect(isFolder(folder('f1', 'F', []))).toBe(true)
+  })
+
+  it('finds a bookmark at any depth, and only bookmark rows', () => {
+    const tree = sample()
+    expect(findFavorite(tree, 'a')?.title).toBe('A')
+    // Inside a folder, one and two levels down.
+    expect(findFavorite(tree, 'b')?.title).toBe('B')
+    expect(findFavorite(tree, 'c')?.title).toBe('C')
+    // A folder id is not a bookmark.
+    expect(findFavorite(tree, 'f1')).toBeUndefined()
+    expect(findFavorite(tree, 'zzz')).toBeUndefined()
+  })
+
+  it('creates a root folder with the title it was given', () => {
+    const created = createFolder([], undefined, 'Work')
+    expect(created.folder?.title).toBe('Work')
+    expect(created.folder?.children).toEqual([])
+    expect(ids(created.next)).toEqual([created.folder?.id])
+  })
+
+  it('creates a nested folder inside an existing one', () => {
+    const outer = createFolder([], undefined, 'Outer')
+    const inner = createFolder(outer.next, outer.folder?.id, 'Inner')
+    const root = inner.next[0]
+    if (!isFolder(root)) throw new Error('expected a folder at the root')
+    expect(root.children.map(node => node.title)).toEqual(['Inner'])
+  })
+
+  it('gives two folders distinct ids and names a blank title', () => {
+    const one = createFolder([], undefined, 'One')
+    const two = createFolder(one.next, undefined, 'Two')
+    expect(two.folder?.id).not.toBe(one.folder?.id)
+    const blank = createFolder([], undefined, '   ')
+    expect(blank.folder?.title).not.toBe('')
+  })
+
+  it('refuses a parent that does not exist, leaving the tree alone', () => {
+    const tree = sample()
+    const created = createFolder(tree, 'nope', 'X')
+    expect(created.folder).toBeUndefined()
+    expect(created.next).toBe(tree)
+  })
+
+  it('renames a folder, and is inert for the same or a blank name', () => {
+    const tree = sample()
+    const renamed = renameFolder(tree, 'f2', 'Archive')
+    const f1 = renamed[1]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    const f2 = f1.children[1]
+    if (!isFolder(f2)) throw new Error('expected f2 to stay a folder')
+    expect(f2.title).toBe('Archive')
+    // Untouched siblings and the bookmark are kept by reference.
+    expect(renamed[0]).toBe(tree[0])
+    expect(renamed[2]).toBe(tree[2])
+    // Renaming to the same name, to blank, or a missing id changes nothing.
+    expect(renameFolder(renamed, 'f2', 'Archive')).toBe(renamed)
+    expect(renameFolder(renamed, 'f2', '   ')).toBe(renamed)
+    expect(renameFolder(renamed, 'missing', 'X')).toBe(renamed)
+  })
+
+  it('deletes a folder with its whole subtree and keeps everything else', () => {
+    const tree = sample()
+    const next = removeFolder(tree, 'f1')
+    expect(ids(next)).toEqual(['a', 'd'])
+    // The nested folder and the bookmark filed in it went with it.
+    expect(findFavorite(next, 'b')).toBeUndefined()
+    expect(findFavorite(next, 'c')).toBeUndefined()
+    expect(next).not.toBe(tree)
+  })
+
+  it('removes nothing when the id names a bookmark or is absent', () => {
+    const tree = sample()
+    // Unpinning is toggleFavorite's job; removeFolder only deletes folders.
+    expect(removeFolder(tree, 'a')).toBe(tree)
+    expect(removeFolder(tree, 'zzz')).toBe(tree)
+  })
+
+  it('files a bookmark into a folder, appended last', () => {
+    const tree = sample()
+    const next = moveFavoriteInto(tree, 'a', 'f1')
+    expect(ids(next)).toEqual(['f1', 'd'])
+    const f1 = next[0]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    expect(ids(f1.children)).toEqual(['b', 'f2', 'a'])
+  })
+
+  it('is inert when the bookmark already sits last in that folder', () => {
+    const tree = sample()
+    const once = moveFavoriteInto(tree, 'a', 'f1')
+    expect(moveFavoriteInto(once, 'a', 'f1')).toBe(once)
+    // A missing folder, a missing bookmark, and a folder id as the source.
+    expect(moveFavoriteInto(tree, 'a', 'nope')).toBe(tree)
+    expect(moveFavoriteInto(tree, 'zzz', 'f1')).toBe(tree)
+    expect(moveFavoriteInto(tree, 'f2', 'f1')).toBe(tree)
+  })
+
+  it('moves a folder into another folder and back to the root', () => {
+    const tree = sample()
+    const nested = moveFolderInto(tree, 'f2', 'f1')
+    // Already the last child of f1: nothing to do.
+    expect(nested).toBe(tree)
+
+    const toRoot = moveFolderInto(tree, 'f2', undefined)
+    expect(ids(toRoot)).toEqual(['a', 'f1', 'd', 'f2'])
+    const f1 = toRoot[1]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    expect(ids(f1.children)).toEqual(['b'])
+    // Moving it to the root again is now a no-op: it is already last.
+    expect(moveFolderInto(toRoot, 'f2', undefined)).toBe(toRoot)
+  })
+
+  it('refuses a folder dropped into itself or its own subtree', () => {
+    const tree = sample()
+    expect(moveFolderInto(tree, 'f1', 'f1')).toBe(tree)
+    expect(moveFolderInto(tree, 'f1', 'f2')).toBe(tree)
+    expect(moveFolderInto(tree, 'missing', 'f1')).toBe(tree)
+    expect(moveFolderInto(tree, 'f1', 'missing')).toBe(tree)
+  })
+
+  it('moves a folder beside a row in another layer', () => {
+    const tree = sample()
+    // f2 lives inside f1; dropping it before the root bookmark d brings it out.
+    const next = moveFolder(tree, 'f2', 'd', 'before')
+    expect(ids(next)).toEqual(['a', 'f1', 'f2', 'd'])
+    const f1 = next[1]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    expect(ids(f1.children)).toEqual(['b'])
+    const f2 = next[2]
+    if (!isFolder(f2)) throw new Error('expected f2 to stay a folder')
+    expect(ids(f2.children)).toEqual(['c'])
+    // The same drop again is a no-op now that it is a sibling of d.
+    expect(moveFolder(next, 'f2', 'd', 'before')).toBe(next)
+  })
+
+  it('moves a folder deeper by dropping it beside an entry in that layer', () => {
+    const tree = [
+      folder('g1', 'Other', [item('x')]),
+      folder('f1', 'Work', [item('b'), folder('f2', 'Nested', [item('c')])]),
+    ]
+    const next = moveFolder(tree, 'f2', 'x', 'before')
+    expect(ids(next)).toEqual(['g1', 'f1'])
+    const g1 = next[0]
+    if (!isFolder(g1)) throw new Error('expected g1 to stay a folder')
+    expect(ids(g1.children)).toEqual(['f2', 'x'])
+    const f1 = next[1]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    expect(ids(f1.children)).toEqual(['b'])
+  })
+
+  it('refuses a folder dropped beside a row inside itself', () => {
+    const tree = sample()
+    // c sits two levels inside f1.
+    expect(moveFolder(tree, 'f1', 'c', 'before')).toBe(tree)
+    expect(moveFolder(tree, 'f1', 'f1', 'before')).toBe(tree)
+    expect(moveFolder(tree, 'missing', 'a', 'before')).toBe(tree)
+    expect(moveFolder(tree, 'f1', 'missing', 'before')).toBe(tree)
+  })
+
+  it('reorders siblings inside a folder without changing their layer', () => {
+    const tree = sample()
+    const next = moveFavorite(tree, 'f2', 'b', 'before')
+    const f1 = next[1]
+    if (!isFolder(f1)) throw new Error('expected f1 to stay a folder')
+    expect(ids(f1.children)).toEqual(['f2', 'b'])
+    const f2 = f1.children[0]
+    if (!isFolder(f2)) throw new Error('expected f2 to stay a folder')
+    expect(ids(f2.children)).toEqual(['c'])
+    // Same reference for a drop that is already in place.
+    expect(moveFavorite(next, 'f2', 'b', 'before')).toBe(next)
+  })
+
+  it('ignores a drop whose target is in another layer', () => {
+    const tree = sample()
+    // d is a root node; b lives inside f1.
+    expect(moveFavorite(tree, 'd', 'b', 'after')).toBe(tree)
+    expect(moveFavorite(tree, 'b', 'd', 'before')).toBe(tree)
+  })
+
+  it('unpins a bookmark filed in a folder instead of duplicating it', () => {
+    const tree = sample()
+    const next = toggleFavorite(tree, 'c')
+    expect(findFavorite(next, 'c')).toBeUndefined()
+    // No second copy appeared at the root.
+    expect(ids(next)).toEqual(['a', 'f1', 'd'])
+    expect(next.some(node => node.id === 'c')).toBe(false)
+  })
+})
+
+describe('favorites tree persistence', () => {
+  it('reads folders back, at any depth', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [
+        { id: 'a', title: 'A' },
+        { id: 'f1', title: 'Work', children: [{ id: 'f2', title: 'Nested', children: [{ id: 'b', title: 'B' }] }] },
+      ],
+    }))
+    expect(parsed.migrated).toBe(false)
+    expect(parsed.ledger.favorites).toEqual([
+      { id: 'a', title: 'A' },
+      { id: 'f1', title: 'Work', children: [{ id: 'f2', title: 'Nested', children: [{ id: 'b', title: 'B' }] }] },
+    ])
+  })
+
+  it('drops a malformed child without losing its folder', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [
+        { id: 'f1', title: 'Work', children: [null, { id: 7 }, { id: 'b' }] },
+      ],
+    }))
+    expect(parsed.ledger.favorites).toEqual([
+      { id: 'f1', title: 'Work', children: [{ id: 'b', title: 'b' }] },
+    ])
+  })
+
+  it('treats a non-array children field as an ordinary bookmark', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [{ id: 'x', title: 'X', children: 'nope' }],
+    }))
+    expect(parsed.ledger.favorites).toEqual([{ id: 'x', title: 'X' }])
+  })
+
+  it('drops duplicate ids across layers, keeping the first', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [
+        { id: 'dup', title: 'Root' },
+        { id: 'f1', title: 'Work', children: [{ id: 'dup', title: 'Nested' }] },
+      ],
+    }))
+    expect(parsed.ledger.favorites).toEqual([
+      { id: 'dup', title: 'Root' },
+      { id: 'f1', title: 'Work', children: [] },
+    ])
+  })
+
+  it('round-trips a deep tree through storage unchanged', () => {
+    const storage = memoryStorage()
+    const ledger = { tabs: [{ id: 'a', title: 'A' }], favorites: sample() }
+    saveLedger(storage, ledger)
+    expect(JSON.parse(storage.value ?? 'null')).toEqual(ledger)
+    // A folder payload is current shape: no rewrite, no backup, no migration.
+    const writes = storage.writes
+    expect(loadLedger(storage)).toEqual(ledger)
+    expect(storage.writes).toBe(writes)
+    expect(storage.getItem(BACKUP_KEY)).toBeNull()
+  })
+
+  it('keeps the tab bucket free of any folder', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [{ id: 'a', title: 'A' }],
+      favorites: [{ id: 'f1', title: 'Work', children: [] }],
+    }))
+    expect(parsed.ledger.tabs).toEqual([{ id: 'a', title: 'A' }])
+    expect(isFolder(parsed.ledger.favorites[0])).toBe(true)
   })
 })

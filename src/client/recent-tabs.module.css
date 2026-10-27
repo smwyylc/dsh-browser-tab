@@ -27,6 +27,13 @@
  *     a hairline, a rule, a title, a bed — never on a whole panel, which stays
  *     paper.
  *
+ * Folders are rows in that same list, not boxes around it: a folder's children
+ * are emitted right after it with a deeper left inset, so the drawer keeps one
+ * scroll area and one row height however deep the tree goes. The single place
+ * this sheet leaves the blue family is the drawer's current-session dot, which
+ * keeps the strip's success green — "you are here" is the same fact on both
+ * surfaces, so it keeps the same mark.
+ *
  * Never use `--dsw-alias-brand-primary` as the accent here: the shipped theme
  * resolves it to #0f1115, exactly the ink of `label-primary`, so an "accent"
  * drawn from it is a black mark on black text and the favorites family becomes
@@ -42,9 +49,10 @@
  *     it is open. It must clear the bar AND the tab menu, not sit under them.
  *
  * Every icon here is drawn in CSS (clip-path, borders) — no glyphs, so the
- * surfaces render identically whatever fonts the shell loads. The single
- * exception is the waiting mark's `?` below, a basic Latin character every font
- * carries, used because no drawn shape reads as a question at 12px.
+ * surfaces render identically whatever fonts the shell loads. Two exceptions,
+ * both basic Latin characters every font carries: the waiting mark's `?`, used
+ * because no drawn shape reads as a question at 12px, and the new-folder `+`,
+ * which is a plus sign and nothing more.
  */
 
 /*
@@ -115,13 +123,13 @@
   align-items: center;
   gap: 6px;
   /*
-   * 80% of the viewport width, centred by `left: 50%` + `translateX(-50%)`
+   * 90% of the viewport width, centred by `left: 50%` + `translateX(-50%)`
    * above. Deliberately uncapped: the request was a proportion, and a ceiling
-   * (say `min(80vw, 1600px)`) would silently stop honouring it on the widest
+   * (say `min(90vw, 1600px)`) would silently stop honouring it on the widest
    * screens. Nothing else depends on this number — `.stripRow` scrolls, and
    * the drawer measures the trigger's rectangle rather than the bar.
    */
-  width: 80vw;
+  width: 90vw;
   box-sizing: border-box;
   /*
    * Bookmark-bar density: 6px vertical padding keeps the whole strip near 41px
@@ -722,6 +730,99 @@
 }
 
 /*
+ * "You are here", inside the drawer.
+ *
+ * The strip marks the active tab with a green dot, and the same fact keeps the
+ * same mark here: the drawer's accent family is blue and belongs to favorites,
+ * while this dot says "the session in view", which is green on both surfaces.
+ * Same size and the same success token as `.dot`, so the two never look like
+ * two different ideas; the class is separate only because the drawer row lays
+ * its children out itself. It sits before the star, at the head of the row.
+ */
+.favDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--dsw-alias-state-success-primary, #16a34a);
+}
+
+/*
+ * A folder row: the same flat bookmark bed as `.favItem`, with the drawer's own
+ * accent reserved for the one moment a folder becomes a destination. Rows are
+ * laid out flat — a folder's children follow it in the same list and carry a
+ * deeper left padding — so this is a sibling of the bookmark rows, not their
+ * parent box.
+ */
+.favFolder {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #666);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.favFolder:hover {
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  color: var(--dsw-alias-label-primary, #111);
+}
+
+.favFolder[data-dragging='1'] {
+  opacity: 0.4;
+}
+
+/* A folder is a destination, not an insertion edge: a wash plus a hairline
+   around the whole row, never the 2px top/bottom line a sibling drop draws.
+   Plain token first; the mixed steps only where they are supported. */
+.favFolder[data-drop-folder='1'] {
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  border-color: var(--fav-accent);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  .favFolder[data-drop-folder='1'] {
+    background: color-mix(in srgb, var(--fav-accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--fav-accent) 40%, transparent);
+  }
+}
+
+/*
+ * The disclosure triangle, drawn with clip-path like every other icon here (no
+ * glyph, no font dependency, no emoji). It points right when the folder is
+ * closed and turns a quarter to point down when it opens; the box does not
+ * change size, so the row never shifts. A real button, so the tree can also be
+ * walked from the keyboard — the row itself toggles too.
+ */
+.favChevron {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  padding: 0;
+  border: none;
+  background: currentColor;
+  clip-path: polygon(30% 10%, 74% 50%, 30% 90%);
+  cursor: pointer;
+  transform: rotate(0deg);
+  transition: transform 140ms ease;
+}
+
+.favChevron[data-expanded='1'] {
+  transform: rotate(90deg);
+}
+
+/*
  * The star: one polygon for both glyphs, so the shape can never drift. Drawn
  * with clip-path — no glyph, no font dependency, no emoji.
  */
@@ -752,6 +853,47 @@
   width: 10px;
   height: 10px;
   color: var(--fav-accent);
+}
+
+/* The header's controls as one group, so the title keeps the left edge and the
+   two buttons sit together at the right — the same rhythm as the tabs' 2px. */
+.favHeadActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+}
+
+/*
+ * New folder: the same quiet icon button as the drawer's star, one character
+ * wide. `+` is a plain character (the sheet's one other text glyph is the
+ * waiting mark's `?`), which keeps it free of any font-drawn symbol.
+ */
+.favNewFolder {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* The star's footprint, in pixels so the two buttons line up whatever the
+     panel's font size resolves to. The glyph inside is one step larger, the
+     way a `+` needs to read at this size. */
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: none;
+  border-radius: 0.4em;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #888);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.favNewFolder:hover {
+  color: var(--fav-accent);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
 }
 
 /* The drawer's "pin the current session" star, the address-bar star of this GUI. */
@@ -799,7 +941,9 @@
 }
 
 .favItem:hover .favRemove,
-.favItem:focus-within .favRemove {
+.favItem:focus-within .favRemove,
+.favFolder:hover .favRemove,
+.favFolder:focus-within .favRemove {
   opacity: 1;
 }
 
@@ -822,7 +966,10 @@
   .menuItem,
   .barButton,
   .favItem,
+  .favFolder,
+  .favChevron,
   .starButton,
+  .favNewFolder,
   .favRemove {
     transition: none;
   }

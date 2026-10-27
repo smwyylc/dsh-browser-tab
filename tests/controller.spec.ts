@@ -359,3 +359,197 @@ describe('RecentTabsController ordering and favorites', () => {
     expect(controller.getSnapshot()).toBe(before)
   })
 })
+
+describe('RecentTabsController folders', () => {
+  it('creates a root folder under the localized default name and notifies once', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const writesBefore = storage.writes
+
+    const id = controller.createFolder()
+
+    expect(id).not.toBe('')
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(storage.writes).toBe(writesBefore + 1)
+    expect(controller.getSnapshot().favorites).toEqual([
+      { id, title: '新文件夹', children: [] },
+    ])
+  })
+
+  it('creates a folder inside another one and returns the new id', () => {
+    const controller = new RecentTabsController(memoryStorage())
+    const outer = controller.createFolder(undefined, 'Outer')
+
+    const inner = controller.createFolder(outer, 'Inner')
+
+    const root = controller.getSnapshot().favorites[0]
+    expect(root).toEqual({ id: outer, title: 'Outer', children: [{ id: inner, title: 'Inner', children: [] }] })
+  })
+
+  it('refuses a missing parent without notifying or persisting', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const writesBefore = storage.writes
+
+    expect(controller.createFolder('nope', 'X')).toBe('')
+
+    expect(listener).not.toHaveBeenCalled()
+    expect(storage.writes).toBe(writesBefore)
+    expect(controller.getSnapshot().favorites).toEqual([])
+  })
+
+  it('renames a folder, and stays inert for the same or a blank name', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const id = controller.createFolder(undefined, 'Old')
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const before = controller.getSnapshot()
+    const writesBefore = storage.writes
+
+    controller.renameFolder(id, 'Old')
+    controller.renameFolder(id, '  ')
+    expect(listener).not.toHaveBeenCalled()
+    expect(storage.writes).toBe(writesBefore)
+    expect(controller.getSnapshot()).toBe(before)
+
+    controller.renameFolder(id, 'New')
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(storage.writes).toBe(writesBefore + 1)
+    expect(JSON.parse(storage.value ?? 'null').favorites).toEqual([
+      { id, title: 'New', children: [] },
+    ])
+  })
+
+  it('deletes a folder with its subtree, leaving the tabs and the activation order alone', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    controller.record('a', 'Alpha')
+    controller.record('b', 'Beta')
+    const folder = controller.createFolder(undefined, 'Work')
+    controller.toggleFavorite('a', 'Alpha')
+    controller.moveFavoriteInto('a', folder)
+
+    const tabsBefore = controller.getSnapshot().tabs
+    const orderBefore = controller.getSnapshot().order
+    const listener = vi.fn()
+    controller.subscribe(listener)
+
+    controller.removeFolder(folder)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(controller.getSnapshot().favorites).toEqual([])
+    // Deleting a folder is a favorites operation: the strip never moves.
+    expect(controller.getSnapshot().tabs).toBe(tabsBefore)
+    expect(controller.getSnapshot().order).toBe(orderBefore)
+    // Closing the active tab still falls back to the MRU survivor.
+    expect(controller.remove('b')).toBe('a')
+  })
+
+  it('does not notify when the folder to delete is absent', () => {
+    const controller = new RecentTabsController(memoryStorage())
+    const listener = vi.fn()
+    controller.subscribe(listener)
+
+    controller.removeFolder('nope')
+
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('files a bookmark into a folder, then treats a second drop as a no-op', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    controller.toggleFavorite('a', 'Alpha')
+    const folder = controller.createFolder(undefined, 'Work')
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const writesBefore = storage.writes
+
+    controller.moveFavoriteInto('a', folder)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(storage.writes).toBe(writesBefore + 1)
+    expect(controller.getSnapshot().favorites).toEqual([
+      { id: folder, title: 'Work', children: [{ id: 'a', title: 'Alpha' }] },
+    ])
+
+    const settled = controller.getSnapshot()
+    controller.moveFavoriteInto('a', folder)
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(storage.writes).toBe(writesBefore + 1)
+    expect(controller.getSnapshot()).toBe(settled)
+  })
+
+  it('moves a folder between layers and refuses a cycle without notifying', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const outer = controller.createFolder(undefined, 'Outer')
+    const inner = controller.createFolder(outer, 'Inner')
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const writesBefore = storage.writes
+
+    // Into its own subtree, and onto itself: both are refusals.
+    controller.moveFolderInto(outer, inner)
+    controller.moveFolderInto(outer, outer)
+    expect(listener).not.toHaveBeenCalled()
+    expect(storage.writes).toBe(writesBefore)
+
+    controller.moveFolderInto(inner, undefined)
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(controller.getSnapshot().favorites).toEqual([
+      { id: outer, title: 'Outer', children: [] },
+      { id: inner, title: 'Inner', children: [] },
+    ])
+  })
+
+  it('moves a folder beside a bookmark in another layer, idempotently', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const outer = controller.createFolder(undefined, 'Outer')
+    const inner = controller.createFolder(outer, 'Inner')
+    controller.toggleFavorite('a', 'Alpha')
+    const listener = vi.fn()
+    controller.subscribe(listener)
+    const writesBefore = storage.writes
+
+    // `a` is a root bookmark; dropping the nested folder before it lifts the
+    // folder out of Outer and next to that bookmark.
+    controller.moveFolder(inner, 'a', 'before')
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(storage.writes).toBe(writesBefore + 1)
+    expect(controller.getSnapshot().favorites).toEqual([
+      { id: outer, title: 'Outer', children: [] },
+      { id: inner, title: 'Inner', children: [] },
+      { id: 'a', title: 'Alpha' },
+    ])
+
+    const settled = controller.getSnapshot()
+    controller.moveFolder(inner, 'a', 'before')
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(controller.getSnapshot()).toBe(settled)
+  })
+
+  it('keeps the bookmark tree across a reload, folders included', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    const folder = controller.createFolder(undefined, 'Work')
+    controller.toggleFavorite('a', 'Alpha')
+    controller.moveFavoriteInto('a', folder)
+
+    const reloaded = new RecentTabsController(storage)
+
+    expect(reloaded.getSnapshot().favorites).toEqual([
+      { id: folder, title: 'Work', children: [{ id: 'a', title: 'Alpha' }] },
+    ])
+    // Reading it back is not a migration: nothing was rewritten.
+    expect(storage.writes).toBe(3)
+  })
+})

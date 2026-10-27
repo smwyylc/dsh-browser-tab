@@ -42,7 +42,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { RecentTabsController } from './controller.ts'
-import { shortId } from './store.ts'
+import { findFavorite, shortId } from './store.ts'
 import type { SessionsLike, UiWorkspaceLike } from './sessions-face.ts'
 import { useSessionView } from './use-current-session.ts'
 import { placeFor } from './drag-place.ts'
@@ -498,13 +498,13 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   // --- Menu body -----------------------------------------------------------
   /** The retained row the menu opened on, if it is still there. */
   const menuTab = menu === undefined ? undefined : snapshot.tabs.find(tab => tab.id === menu.id)
-  // Bookmark state is a lookup in the favorites collection, not a field on the
-  // tab row: the menu must offer "remove" for a bookmark whose tab was closed
-  // and reopened. The flag lives on the menu item alone (`data-favorite`, the
-  // weight step below) — a tab row carries no favorite field and the strip has
-  // no favorite grouping, so nothing about the row has to be re-derived here.
-  const menuFavorite = menu !== undefined
-    && snapshot.favorites.some(entry => entry.id === menu.id)
+  // Bookmark state is a lookup in the favorites tree, not a field on the tab
+  // row: the menu must offer "remove" for a bookmark whose tab was closed and
+  // reopened, and for one filed inside a folder. The flag lives on the menu item
+  // alone (`data-favorite`, the weight step below) — a tab row carries no
+  // favorite field and the strip has no favorite grouping, so nothing about the
+  // row has to be re-derived here.
+  const menuFavorite = menu !== undefined && findFavorite(snapshot.favorites, menu.id) !== undefined
   // Pinning stores a title: the live one first, then the retained row's.
   const menuTitle = menuTab === undefined
     ? undefined
@@ -517,7 +517,7 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
 
   return (
     <>
-      {/* The band spans the full width while the bar is only 80vw, so the
+      {/* The band spans the full width while the bar is only 90vw, so the
           pointer can open the bar from a spot the bar does not cover. Nothing
           would then fire the bar's own mouseleave and it would stay parked
           open; leaving the band schedules the ordinary retract instead. Moving
