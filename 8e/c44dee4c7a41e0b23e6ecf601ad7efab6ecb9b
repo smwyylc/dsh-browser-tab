@@ -1,0 +1,108 @@
+.gitignore
+  h_12a30d08a0ab29 1-15
+AGENTS.md
+  h_12a30d08a0ab29 1-150
+README.i18n.yaml
+  h_12a30d08a0ab29 1-6
+README.md
+  h_12a30d08a0ab29 1-199
+README.zh.md
+  h_12a30d08a0ab29 1-142
+cordis.patch.yml
+  h_12a30d08a0ab29 1-7
+lib/client.js
+  h_12a30d08a0ab29 1-1645
+lib/client.js.map
+  h_12a30d08a0ab29 1
+lib/index.js
+  h_12a30d08a0ab29 1-8
+lib/types/client/FavoriteButton.d.ts
+  h_12a30d08a0ab29 1-5
+lib/types/client/FavoritesPanel.d.ts
+  h_12a30d08a0ab29 1-11
+lib/types/client/RecentTabs.d.ts
+  h_12a30d08a0ab29 1-10
+lib/types/client/controller.d.ts
+  h_12a30d08a0ab29 1-81
+lib/types/client/drag-place.d.ts
+  h_12a30d08a0ab29 1-20
+lib/types/client/fav-drawer-state.d.ts
+  h_12a30d08a0ab29 1-26
+lib/types/client/index.d.ts
+  h_12a30d08a0ab29 1-27
+lib/types/client/locales.d.ts
+  h_12a30d08a0ab29 1-31
+lib/types/client/sessions-face.d.ts
+  h_12a30d08a0ab29 1-130
+lib/types/client/shell-overlay-slot.d.ts
+  h_12a30d08a0ab29 1-29
+lib/types/client/store.d.ts
+  h_12a30d08a0ab29 1-169
+lib/types/client/use-current-session.d.ts
+  h_12a30d08a0ab29 1-50
+lib/types/index.d.ts
+  h_12a30d08a0ab29 1-14
+package.json
+  h_12a30d08a0ab29 1-65
+src/client/FavoriteButton.tsx
+  h_12a30d08a0ab29 1-47
+src/client/FavoritesPanel.tsx
+  h_12a30d08a0ab29 1-305
+src/client/RecentTabs.tsx
+  h_12a30d08a0ab29 1-583
+src/client/controller.ts
+  h_12a30d08a0ab29 1-158
+src/client/css-modules.d.ts
+  h_12a30d08a0ab29 1-4
+src/client/drag-place.ts
+  h_12a30d08a0ab29 1-28
+src/client/fav-drawer-state.ts
+  h_12a30d08a0ab29 1-44
+src/client/index.ts
+  h_12a30d08a0ab29 1-95
+src/client/locales.ts
+  h_12a30d08a0ab29 1-64
+src/client/recent-tabs.module.css
+  h_12a30d08a0ab29 1-829
+src/client/sessions-face.ts
+  h_12a30d08a0ab29 1-140
+src/client/shell-overlay-slot.ts
+  h_12a30d08a0ab29 1-30
+src/client/store.ts
+  h_12a30d08a0ab29 1-403
+src/client/use-current-session.ts
+  h_12a30d08a0ab29 1-172
+src/index.ts
+  h_12a30d08a0ab29 1-17
+tests/controller.spec.ts
+  h_12a30d08a0ab29 1-361
+tests/rename.spec.tsx
+  h_12a30d08a0ab29 1-510
+tests/reorder.spec.tsx
+  h_12a30d08a0ab29 1-777
+tests/store.spec.ts
+  h_12a30d08a0ab29 1-530
+tsconfig.build.json
+  h_12a30d08a0ab29 1-17
+tsconfig.json
+  h_12a30d08a0ab29 1-31
+tsconfig.vitest.json
+  h_12a30d08a0ab29 1-8
+tsdown.config.ts
+  h_12a30d08a0ab29 1-17
+vitest.config.ts
+  h_12a30d08a0ab29 1-28
+vitest.setup.ts
+  h_12a30d08a0ab29 1-8
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "8ec44dee4c7a41e0b23e6ecf601ad7efab6ecb9b",
+  "prompts": {},
+  "humans": {
+    "h_12a30d08a0ab29": {
+      "author": "蔡鸣铭 <caimingming@eccom.com.cn>"
+    }
+  }
+}
