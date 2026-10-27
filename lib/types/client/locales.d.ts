@@ -18,6 +18,12 @@ export declare const zh: {
     'fav.remove': string;
     'fav.button': string;
     'fav.empty': string;
+    'fav.newFolder': string;
+    'fav.folderDefault': string;
+    'fav.folderExpand': string;
+    'fav.folderCollapse': string;
+    'fav.folderRemove': string;
+    'fav.folderRename': string;
     'menu.favorite': string;
     'menu.unfavorite': string;
     'rename.label': string;

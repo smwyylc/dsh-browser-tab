@@ -1,7 +1,7 @@
 # AGENTS.md — dsh-recent-tabs
 
 DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、手动关闭）与从条右端
-下沉的收藏夹抽屉（条内最右端按钮开合、标签右键收藏）。包级规则：
+下沉的收藏夹抽屉（条内最右端按钮开合、标签右键收藏、Chrome 式收藏文件夹）。包级规则：
 只写本包特有约定，不重复根 AGENTS.md 与 packages/AGENTS.md 的全局/包级规则。
 
 ## 本包要点
@@ -35,11 +35,31 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
 - **拖拽只改显示顺序**：走 `moveTab` / `controller.move`，只动持久列表，`order`（激活顺序）
   原样透传——`touchOrder` / `dropOrder` / `nextActiveAfterClose` 的语义不变，所以拖完再关
   当前 tab 仍回退到上一次用过的那个。
-- **收藏是独立集合，不是 tab 行上的字段**：`store.ts` 里 `favorites: FavoriteEntry[]` 与
+- **收藏是独立集合，不是 tab 行上的字段**：`store.ts` 里 `favorites: FavoriteNode[]` 与
   `tabs: RecentTab[]` 平级，落盘形状是 `{ tabs, favorites }`（同键 `dsh-recent-tabs-v1`）。
+  `favorites` 是收藏树的**根层**（根层可以同时有收藏项与文件夹），`FavoriteNode` =
+  `FavoriteEntry | FavoriteFolder`，文件夹靠 `children` 区分（`isFolder`）。
   `removeTab` / `controller.remove` 只删 tab 行、**永远不碰 favorites**——「在顶部条关掉标签
-  不丢收藏」就靠这条；`toggleFavorite` / `moveFavorite` 只动 favorites，不动 tab 行序与激活
+  不丢收藏」就靠这条；`toggleFavorite` / `moveFavorite` 只动收藏树，不动 tab 行序与激活
   顺序，所以 tab 条里没有收藏分组、也没有 `data-favorite` 分组样式。
+- **收藏夹是 Chrome 式树，可以做文件夹**：`createFolder(parentId?, title?)` 建在根层或某个
+  文件夹里（不传 parent 就是根层，空标题用本地化默认名）、`renameFolder`、`removeFolder`（连整棵
+  子树一起删，绝不碰 `tabs`）、`moveFavoriteInto`（收藏项追加到目标文件夹末尾）、
+  `moveFolderInto`（文件夹移进别的文件夹，`undefined` = 移回根层，**必须防环**：移到自己是
+  子孙的文件夹里直接不动）、`moveFolder`（文件夹落在**收藏项行**上 → 成为那一行所在层的兄弟，
+  同层就是重排、跨层就是换层，同样防环）。**幂等照旧**：空标题 / 同名 / 已在目标层末尾 /
+  目标不存在都返回同一个引用、不通知、不落盘。`toggleFavorite` 是**深搜**的——已收藏（哪怕在
+  文件夹里）就删那一行，不在根层复制第二份；`moveFavorite` 只做**同层**兄弟重排（收藏项跨层
+  落点没有意义，所以拖拽时也不给高亮），换层只能靠 `moveFolderInto` / `moveFolder`。
+- **收藏树渲染是扁平的**：`FavoritesPanel` 把树摊成一串行（`buildTree`），文件夹展开时它的子项
+  紧跟在后面，深度只体现为左内边距（每级 12px，从行自身 8px 起算，`data-depth` 也带着），
+  `.favList` 仍是**唯一**的 `overflow-y: auto` 容器——不要改成嵌套 DOM 树或给文件夹再加滚动区。
+  文件夹行 = 展开三角（`.favChevron`，clip-path 画的，按钮可键盘操作）+ 标题（双击就地重命名，
+  复用 `.editor`）+ 悬停才出现的 `×`（删整棵）。标题行右侧的 `+`（`.favNewFolder`，普通字符）
+  在根层建一个默认名文件夹并**立刻进入重命名**。空态只在根层一个节点都没有时显示。
+- **文件夹展开状态是纯 UI 状态**：`fav-folder-state.ts` 的模块级 observable（`folderExpansion` /
+  `setFolderExpanded` / `toggleFolderExpanded` / `subscribeFolderExpanded`），**不落盘**、不进
+  `store.ts`；抽屉关掉重开仍记得本次会话展开过哪些文件夹，刷新则全部收起。默认全收起。
 - **旧数据迁移与备份**：读到裸数组（旧形状，`favorite` 挂在行上）时，**每一行都留在 `tabs`**，
   带 `favorite === true` 的行**同时**进 `favorites`——旧形状里一行既是一个 tab 又是一条收藏，
   收藏是独立集合，不等于从条里消失；两个桶各自去重、各自保序（同一 id 可同时在两边），
@@ -54,6 +74,10 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   `max-height: min(60vh, 520px)`，高度随内容、列表区自己 `overflow-y: auto`；不要写
   `bottom: 0`（fixed 同时给 `top`/`bottom` 会被拉满屏），投影只取最轻一档。星标在顶部、
   竖排、`×` 悬显删除、点击只走 `switchTo`、拖拽调序、Esc/点外关闭这些形态语义不要动。
+  **当前项标一个绿点**（`.favDot`，6px 实心圆，`--dsw-alias-state-success-primary`，与条上
+  `.dot` 同尺寸同 token）：绿点 = 当前会话，跨表面语义一致，**不要改成收藏家族的蓝**；它落在
+  行首（星标左侧），和原有的蓝色淡化底并存，失效行若恰好是当前项两个标记一起出，并带
+  `aria-current="true"`。圆点只在抽屉里加，tab 条的 `.dot` 不要动。
 - **顶部条只有一行 tab**：tabs 在滚动区 `.stripRow` 内，收藏按钮在条内**最右端、
   `.stripRow` 之外**（`.bar` 的最后一个子元素，`flex: 0 0 auto`），条与按钮之间只用
   条自身的 6px `gap`（与 tab 之间的间距同节奏），不再加分隔线。按钮**不能**跟着
@@ -97,8 +121,8 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   hover 高亮」——不叠渐变、不描四边框、不要抬升阴影；hover / 激活态一律用背景 token 换档
   （`bg-layer-2` 做 hover 底、强调色淡化做激活底），不要用字面色（收藏家族的强调色例外，见下一条）。
   `.zone` 是纯热区，永远不加视觉。tab 与列表项都是「平底 + 圆角高亮」，不要退回成每行一张卡片。
-- **顶部条宽 80%**：`.bar` 的 `width: 80vw`，仍靠 `left: 50%` + `translateX(-50%)` 居中；**不加**
-  `min(80vw, …)` 上限（用户要的是占屏比例，封顶会在超大屏上悄悄失守）。`.stripRow`、`.zone` 与抽屉
+- **顶部条宽 90%**：`.bar` 的 `width: 90vw`，仍靠 `left: 50%` + `translateX(-50%)` 居中；**不加**
+  `min(90vw, …)` 上限（用户要的是占屏比例，封顶会在超大屏上悄悄失守）。`.stripRow`、`.zone` 与抽屉
   锚定都随条宽自动跟随——抽屉按按钮矩形算 `right`，不要为条宽引入像素依赖或媒体查询。
 - **收藏配色独立于导航栏**：条与 tab 本体保持中性（`bg-layer-*` / `border-l*` / `label-*`）；收藏家族
   ——条右端按钮、抽屉、右键菜单收藏项——统一用一抹**主题自带的交互蓝（`state-business-primary`，
@@ -120,7 +144,8 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   强调色**——上一轮收藏家族用了它，整族强调色实际全是黑的，等于没设颜色；也不要为差异化自造 HEX。
 - **条内行容器与弹出的类名都不能含 `tab`**：tab 行容器用 `.stripRow`；`tests/rename.spec.tsx` 与
   `tests/reorder.spec.tsx` 的 `tabs()` helper 取 `div[class*="tab"]`，容器或菜单壳一旦带 `tab`
-  就会被当成 tab 行本身，`tabByText()` 与 `data-active` 断言会直接红。
+  就会被当成 tab 行本身，`tabByText()` 与 `data-active` 断言会直接红。抽屉里新增的类名一律用
+  `fav` 前缀（`.favFolder` / `.favChevron` / `.favNewFolder` / `.favDot` / `.favHeadActions`）。
 - **两个表面共用会话视图**：`use-current-session.ts` 导出 `useSessionView(ctx)`（选中项、liveIds、
   标题、runningIds、completedIds、waitingIds）与 `currentSessionId`，Tab 条与抽屉都用它，不要再各写一份 `reduce`，
   否则标题与失效判定会漂移。

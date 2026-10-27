@@ -14,7 +14,7 @@ bookmark.
 - **Hover to reveal.** The strip is parked off-screen at the top edge. Move the
   pointer into the top 10px band and it slides down; move away and it retracts
   after 260ms. It never covers the conversation while you are reading.
-- **Wide and centred.** The strip spans 80% of the viewport width, centred on
+- **Wide and centred.** The strip spans 90% of the viewport width, centred on
   the top edge, so a wide screen shows more tabs instead of the same narrow
   column; the tab row scrolls inside it when they still do not fit.
 - **Wheel scrolls the tabs.** With the pointer over the tab row, the wheel moves
@@ -82,12 +82,27 @@ bookmark.
   already pinned. Both entry points write the same favorites collection. The
   strip's own star only opens the drawer, and favoriting never reorders the
   strip.
-- **Inside the drawer.** Favorites list in stored order, the current session
-  highlighted: click an entry to open that session, click the cross that appears
-  on hover to unpin it (the tab and its session stay), drag entries up and down
-  to reorder. An entry whose session is gone stays listed, dimmed and struck
-  through, until you unpin it. With nothing pinned, the drawer spells out both
-  entry points.
+- **Inside the drawer.** Favorites list in stored order, and the session you are
+  looking at carries a green dot — the very dot the strip puts on its tab — on
+  top of a blue bed: click an entry to open that session, click the cross that
+  appears on hover to unpin it (the tab and its session stay), drag entries up
+  and down to reorder. An entry whose session is gone stays listed, dimmed and
+  struck through, until you unpin it. With nothing pinned, the drawer spells out
+  both entry points.
+- **Folders, like a browser's bookmarks.** The drawer holds folders as well as
+  bookmarks. The `+` beside the star creates a folder at the top level and puts
+  its name straight into the editor: type and press Enter, or Escape to keep the
+  default name. Click a folder row to open or close it, double-click its name to
+  rename it in place, and hover it for the `×` that deletes the folder together
+  with everything filed inside — the tabs of those sessions stay in the strip.
+  Children are indented under their folder in the same scrolling list, so
+  nesting never adds a second scroll area. Drag a bookmark onto a folder row to
+  file it there (the folder opens itself so you can see where it went), drag it
+  onto another bookmark to reorder within that layer, drag a folder onto another
+  folder to nest it, and drag a folder onto a bookmark to move that folder into
+  the bookmark's layer — a folder can never be dropped into itself or into one
+  of its own sub-folders. Whether a folder is open is a view state: it survives
+  closing the drawer, not a page reload.
 - **Closing the active tab falls back to MRU.** Closing the tab you are looking
   at switches the view to the tab you were on before it (most-recently-used
   order); closing any other tab leaves the view alone. If no tab is left, the
@@ -100,14 +115,18 @@ bookmark.
   reflow the row; long titles ellipsize.
 - **Survives restart.** Both collections are stored in the browser's
   `localStorage` under `dsh-recent-tabs-v1`, as one record of `{ tabs,
-  favorites }`, so they are still there after a page reload or a GUI restart.
-  Closing the browser does not clear them. The order and the bookmarks are part
-  of that record; whether the drawer is open is not. A record written by an
+  favorites }` — where `favorites` is the top level of a bookmark tree, holding
+  bookmark rows and folders side by side — so they are still there after a page
+  reload or a GUI restart. Closing the browser does not clear them. The order,
+  the bookmarks and the folder structure are part of that record; whether a
+  folder is open and whether the drawer is open are not. A record written by an
   older version (a bare tab array, with a `favorite` flag on each row) is
   migrated on the first load: every row stays a tab, and the flagged rows also
   join `favorites` — one row was both, and pinning a tab never closed it — with
   each list keeping its original order; the original text is copied to
-  `dsh-recent-tabs-v1-backup` before the rewrite.
+  `dsh-recent-tabs-v1-backup` before the rewrite. A favorites list from before
+  folders existed is simply a tree with no folders in it, so it needs no
+  migration at all.
 - **Stale tabs stay visible.** A retained session that has left the live list
   stays in the strip, dimmed and struck through, until you close it.
 
@@ -140,12 +159,13 @@ parked strip would put the drawer's anchor above the viewport.
 | Client | `src/client/index.ts` | Registers the dictionaries and mounts the two surfaces (strip, drawer), each in its own `try`/`catch`. |
 | Client | `src/client/RecentTabs.tsx` | The React strip: one row of tabs, the favorites trigger at its right end, hover and drag state, inline rename, and the per-tab context menu. It also holds the strip on screen while the drawer is open. |
 | Client | `src/client/FavoriteButton.tsx` | The trigger at the strip's right end: star glyph plus label, `aria-haspopup="dialog"` and `aria-expanded` bound to the drawer. |
-| Client | `src/client/FavoritesPanel.tsx` | The drawer: anchors itself to the trigger rectangle, pins the current session, lists favorites, drags them vertically. |
+| Client | `src/client/FavoritesPanel.tsx` | The drawer: anchors itself to the trigger rectangle, pins the current session, draws the bookmark tree, creates and renames folders, drags rows vertically and files them into folders. |
 | Client | `src/client/fav-drawer-state.ts` | Module-level open/closed flag shared by the trigger, the strip and the drawer; pure UI state, never persisted. |
+| Client | `src/client/fav-folder-state.ts` | Module-level set of expanded folders; pure UI state, never persisted. |
 | Client | `src/client/use-current-session.ts` | The session view (selection, live ids, titles, run facts) shared by the strip and the drawer. |
 | Client | `src/client/drag-place.ts` | Drop-side geometry: left/right for the strip row, top/bottom for the drawer column. |
 | Client | `src/client/controller.ts` | Snapshot owner over both stored collections; notifies only on real changes. |
-| Client | `src/client/store.ts` | Pure, framework-free ledger logic: parse and migrate, tabs, favorites, reorder, load, save. |
+| Client | `src/client/store.ts` | Pure, framework-free ledger logic: parse and migrate, tabs, the bookmark tree (folders included), reorder, load, save. |
 
 Session data comes from the Session Controller's `ctx.sessions.list` snapshot
 source plus `ctx.uiWorkspace.openSession(id)`. The surfaces are global while
@@ -156,10 +176,14 @@ The stored list is authoritative for *membership*; the live session list is
 authoritative for *titles and presence*. That split is what lets a retained tab
 outlive its session without losing its last known name.
 
-Favorites are a collection of their own, not a flag on a stored row:
-`toggleFavorite` appends to or removes from `favorites`, and `moveFavorite`
-reorders only that list. Neither touches the tab list or the activation order,
-which is what lets closing a tab leave its bookmark in place.
+Favorites are a collection of their own, not a flag on a stored row. They form a
+tree: `favorites` is its top level, and a folder is a node that holds bookmark
+rows and other folders. `toggleFavorite` pins a session at the top level and
+unpins it wherever it sits, `moveFavorite` reorders siblings inside their own
+layer, and the folder operations (`createFolder`, `renameFolder`,
+`removeFolder`, `moveFavoriteInto`, `moveFolderInto`) only ever rewrite that
+tree. None of them touches the tab list or the activation order, which is what
+lets closing a tab leave its bookmark in place.
 
 The context menu is drawn by this plugin, not by a shell menu component: it is
 a `position: fixed` popup at the click point, clamped into the viewport, and it
