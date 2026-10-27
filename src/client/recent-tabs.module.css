@@ -1,0 +1,829 @@
+/**
+ * Recent-tabs surface styles.
+ *
+ * Three surfaces share this sheet:
+ *   - the strip: a thin trigger band at the top edge plus a single-row bar that
+ *     is parked off-screen until hover, with the favorites trigger at its right
+ *     end (the bar is also that drawer's anchor);
+ *   - the context menu one tab opens (a small fixed popup, never a shell menu);
+ *   - the favorites drawer: a compact fixed panel on the right edge of the
+ *     conversation area, anchored to that trigger's own rectangle;
+ *
+ * Colors come from the shell's alias tokens so both themes apply without
+ * overrides. Where a derived color is wanted, the plain token declaration comes
+ * first and the `color-mix` version only lands inside `@supports`.
+ *
+ * Two color families, on purpose:
+ *   - the strip and its tabs stay neutral — `bg-layer-*`, `border-l*`,
+ *     `label-*` — which is what makes it read as a bookmark bar;
+ *   - the favorites surfaces (the trigger at the bar's right end, the drawer,
+ *     and the menu row that pins a tab) share one accent: the theme's own
+ *     interactive blue (`state-business-primary`, the hue behind `link` and
+ *     `button-info-fill`), kept a touch calmer than the raw token (the derived
+ *     value lives in `--fav-accent` below). The same blue marks the running
+ *     spinner, the done check, the waiting question mark and the active/drop
+ *     outlines, so "favorites", "running", "answered", "waiting" and "here"
+ *     read as one family. The accent only ever lands on decorations — a glyph,
+ *     a hairline, a rule, a title, a bed — never on a whole panel, which stays
+ *     paper.
+ *
+ * Never use `--dsw-alias-brand-primary` as the accent here: the shipped theme
+ * resolves it to #0f1115, exactly the ink of `label-primary`, so an "accent"
+ * drawn from it is a black mark on black text and the favorites family becomes
+ * indistinguishable from the neutral bar. The blue token is the one with a
+ * real hue in both themes.
+ *
+ * Layering, bottom to top, is one chain and nothing else depends on it:
+ *   - `.zone` 2147483000 — the invisible trigger band, under the bar it calls;
+ *   - `.bar` 2147483001 — the strip itself;
+ *   - `.menu` 2147483002 — the self-drawn tab menu, above the transformed bar;
+ *   - `.favPanel` 2147483003 — the drawer, the topmost surface, because it hangs
+ *     below the bar's right end and is the thing the user is looking at while
+ *     it is open. It must clear the bar AND the tab menu, not sit under them.
+ *
+ * Every icon here is drawn in CSS (clip-path, borders) — no glyphs, so the
+ * surfaces render identically whatever fonts the shell loads. The single
+ * exception is the waiting mark's `?` below, a basic Latin character every font
+ * carries, used because no drawn shape reads as a question at 12px.
+ */
+
+/*
+ * The accent of the whole favorites family, calmed one step.
+ *
+ * `state-business-primary` (#4176e6) is the shell's interactive blue — the same
+ * value behind `link` and `button-info-fill` — so the favorites family reads as
+ * native chrome instead of as a warning, and it is the hue the user asked for
+ * after finding the previous amber too loud. Nothing in this sheet draws the
+ * raw token any more: everything reads this one derived value instead, the blue
+ * mixed eight-and-a-half parts to one-and-a-half into the theme's own paper
+ * (`bg-overlay`). That keeps the hue while dropping the glare, and because the
+ * neutral is the surface itself the mix walks towards light paper in the light
+ * theme and towards dark paper in the dark one. One percentage, one place.
+ *
+ * The plain declaration is the raw token, so a browser without `color-mix`
+ * still gets a real accent; the `@supports` block only swaps the value of the
+ * variable, never a property, and every real declaration above the mixes stays
+ * a plain `var()` line.
+ *
+ * Solid glyphs and text take it as it is; the hairlines, rules and beds mix it
+ * with `transparent` at their own percentages (22/32/40% for the trigger frame,
+ * 10/12/14% for the washes, 32% for the title rule, 18% for the panel edge), so
+ * those relative steps are untouched — only the colour they are mixed from got
+ * calmer.
+ */
+.bar,
+.menu,
+.favPanel {
+  --fav-accent: var(--dsw-alias-state-business-primary, #4176e6);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  .bar,
+  .menu,
+  .favPanel {
+    --fav-accent: color-mix(
+      in srgb,
+      var(--dsw-alias-state-business-primary, #4176e6) 85%,
+      var(--dsw-alias-bg-overlay, #e9ecf2)
+    );
+  }
+}
+
+/*
+ * Pure hot zone: full width, 10px tall, no background, no border. It only
+ * reveals the bar, so it stays visually inert — the bar is above it.
+ */
+.zone {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  z-index: 2147483000;
+  pointer-events: auto;
+}
+
+.bar {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%) translateY(-100%);
+  z-index: 2147483001;
+  pointer-events: auto;
+  /* One row: the tab row, an optional error, and the favorites trigger. */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  /*
+   * 80% of the viewport width, centred by `left: 50%` + `translateX(-50%)`
+   * above. Deliberately uncapped: the request was a proportion, and a ceiling
+   * (say `min(80vw, 1600px)`) would silently stop honouring it on the widest
+   * screens. Nothing else depends on this number — `.stripRow` scrolls, and
+   * the drawer measures the trigger's rectangle rather than the bar.
+   */
+  width: 80vw;
+  box-sizing: border-box;
+  /*
+   * Bookmark-bar density: 6px vertical padding keeps the whole strip near 41px
+   * instead of the 49px it had, so it reads as a thin shelf rather than a card.
+   * The horizontal 10px is the calm edge the tabs need at both ends.
+   */
+  padding: 6px 10px;
+  background: var(--dsw-alias-bg-overlay, #fff);
+  /*
+   * A hairline on the three edges that are actually on screen. The bar hangs
+   * from the sheet's top edge, so a top border would draw a seam that is not
+   * there; the bottom corners are the only corners it needs.
+   *
+   * One step up from the faintest border token: `l1` reads as a dead grey
+   * against the overlay in the light theme and all but vanishes in the dark one,
+   * while `l2` stays a single readable line in both (each theme resolves it on
+   * its own side of the surface, so there is never a white edge on a dark
+   * background or a dark edge on a light one).
+   */
+  border: 1px solid var(--dsw-alias-border-l2, #d8d8d8);
+  border-top: none;
+  /* Restrained corners: the bar is a shelf under the sheet's edge, not a card. */
+  border-radius: 0 0 9px 9px;
+  /* Solid token fallback first; the elevation is mixed further down. */
+  box-shadow: 0 2px 8px var(--dsw-alias-border-l1, #e5e5e5);
+  overflow: hidden;
+  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 220ms ease;
+  font-size: 13px;
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  .bar {
+    /* Resting elevation: one soft step, 18px of blur, mixed from the label
+       token so both themes stay in family. */
+    box-shadow: 0 4px 18px color-mix(in srgb, var(--dsw-alias-label-primary, #111) 8%, transparent);
+  }
+
+  /* Open is a nudge, not another layer: same shape, a slightly longer fall-off.
+     Two percentage points and 2px of blur — no visible swap between states. */
+  .bar[data-open='1'] {
+    box-shadow: 0 6px 20px color-mix(in srgb, var(--dsw-alias-label-primary, #111) 10%, transparent);
+  }
+}
+
+.bar[data-open='1'] {
+  transform: translateX(-50%) translateY(0);
+}
+
+/*
+ * The tab row. It scrolls sideways on its own, so a long list never wraps and
+ * never grows the bar. The 6px gap matches the bar's own row gap, so the rhythm
+ * between tabs, the row and the trigger is one value.
+ */
+.stripRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  /* Fixed width: tabs must not reflow as titles change. */
+  width: 150px;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: var(--dsw-alias-label-secondary, #666);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  border: 1px solid transparent;
+  user-select: none;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    color 140ms ease,
+    box-shadow 140ms ease,
+    opacity 140ms ease;
+}
+
+/* Flat hover: the highlight is the background step, not a lifted shadow. */
+.tab:hover {
+  color: var(--dsw-alias-label-primary, #111);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-color: var(--dsw-alias-border-l1, #e5e5e5);
+}
+
+.tab[data-active='1'] {
+  color: var(--dsw-alias-label-primary, #111);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-color: var(--fav-accent);
+}
+
+/* A retained session that has left the live list reads dimmer. */
+.tab[data-stale='1'] .label {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+/* Dragged source fades; the drop target shows the insertion edge. */
+.tab[data-dragging='1'] {
+  opacity: 0.4;
+}
+
+.tab[data-drop='before'] {
+  box-shadow: inset 2px 0 0 0 var(--fav-accent);
+}
+
+.tab[data-drop='after'] {
+  box-shadow: inset -2px 0 0 0 var(--fav-accent);
+}
+
+.label {
+  order: 2;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--dsw-alias-state-success-primary, #16a34a);
+}
+
+/* Agent turn in progress: rotating arc spinner in the accent blue, the same
+   hue the favorites family carries, so the strip holds one accent instead of
+   two competing ones. It shares the leading status slot with the done mark
+   below and never shows at the same time as it: a running turn is the fresher
+   fact. (The current-session dot keeps the success green: "you are here" and
+   "still running" are two different facts.)
+   The accent is the shell's business blue rather than the brand one on purpose:
+   the brand accent resolves to black in this theme, which drew the arc as an
+   invisible dark ring. */
+.runSpinner {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  box-sizing: border-box;
+  border: 2px solid var(--fav-accent);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: run-spin 0.9s linear infinite;
+}
+
+@keyframes run-spin {
+  to { transform: rotate(360deg); }
+}
+
+/*
+ * A turn that finished while you were not looking at that session: one static
+ * check in the same calmed blue as the spinner.
+ *
+ * Drawn as a clip-path polygon rather than a glyph, like the favorites star, so
+ * it carries no font dependency (and no emoji). A check, not a second ring:
+ * the spinner already owns "circling", and the success dot already owns a
+ * filled circle, so the third state needs a shape of its own to read at 9px.
+ * No animation on purpose — the request was a quiet mark, not a second thing
+ * moving on the strip; it only ever appears or disappears.
+ */
+.doneMark {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  background: var(--fav-accent);
+  clip-path: polygon(38% 72%, 82% 20%, 92% 30%, 39% 90%, 8% 56%, 18% 46%);
+}
+
+/*
+ * A session blocked on the user: a question or a plan review is waiting for an
+ * answer, so the turn cannot move until it gets one. Same slot, same calmed blue.
+ *
+ * Three silhouettes, so the three states never trade places at a glance: the
+ * spinner is the only thing that moves and it is a ring, the done mark is a
+ * closed check, and this one is an open hook followed by a dot. No animation on
+ * purpose — like the check, it only ever appears or disappears.
+ *
+ * The glyph is a plain `?`, the one spot in this sheet that leans on text rather
+ * than a drawn shape: no clip-path polygon reads as a question at 12px. It is a
+ * basic Latin character, so it is present in whatever font the shell loads, and
+ * it is emitted through a pseudo-element rather than a text node so the tab's
+ * own text content stays exactly its title (the ellipsis and the tests read it).
+ *
+ * The box is 12px square with `flex: none`, the spinner's own footprint, so the
+ * mark can neither widen the fixed 150px tab nor shift the title's ellipsis
+ * point when it appears.
+ */
+.waitMark {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--fav-accent);
+}
+
+.waitMark::after {
+  content: '?';
+}
+
+.close {
+  order: 3;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 5px;
+  font-size: 14px;
+  color: var(--dsw-alias-label-secondary, #888);
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.close:hover {
+  color: var(--dsw-alias-state-error-primary, #dc2626);
+  background: var(--dsw-alias-bg-layer-2, #eee);
+}
+
+.empty {
+  flex: 1 1 auto;
+  text-align: center;
+  color: var(--dsw-alias-label-secondary, #888);
+  padding: 8px 4px;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+}
+
+/* Inline rename editor: fills the fixed-width tab so the row never reflows. */
+.editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--dsw-alias-label-primary, #111);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border: 1px solid var(--dsw-alias-brand-primary, #2563eb);
+  border-radius: 6px;
+  outline: none;
+}
+
+.error {
+  color: var(--dsw-alias-state-error-primary, #dc2626);
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+/* --- The tab context menu ------------------------------------------------ */
+
+/*
+ * A self-drawn popup: fixed at the click point, clamped into the viewport by
+ * the component. It is deliberately not a shell menu component and carries no
+ * shell class names.
+ *
+ * Second from the top: it must clear the bar it was opened from, and it
+ * deliberately yields to the favorites drawer (2147483003), which is the
+ * surface the user is interacting with while it is open.
+ */
+.menu {
+  position: fixed;
+  z-index: 2147483002;
+  min-width: 140px;
+  box-sizing: border-box;
+  padding: 4px;
+  background: var(--dsw-alias-bg-overlay, #fff);
+  border: 1px solid var(--dsw-alias-border-l1, #e5e5e5);
+  border-radius: 10px;
+  /* Plain token first; the mixed variant only where it is supported. */
+  box-shadow: 0 6px 18px var(--dsw-alias-border-l1, #e5e5e5);
+  font-size: 12px;
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  .menu {
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--dsw-alias-label-primary, #111) 18%, transparent);
+  }
+}
+
+.menuItem {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary, #111);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.menuItem:hover {
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+}
+
+/*
+ * The pin row is the third favorites surface, so it carries the same accent as
+ * the trigger and the drawer instead of the neutral menu ink. Its pinned state
+ * is expressed structurally — one weight heavier — rather than with a second
+ * color, which keeps it readable in both themes and leaves the accent meaning
+ * "favorites" and nothing else.
+ */
+.menuItem[data-dsh-part='tab-menu-favorite'] {
+  color: var(--fav-accent);
+}
+
+.menuItem[data-dsh-part='tab-menu-favorite'][data-favorite='1'] {
+  font-weight: 600;
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  .menuItem[data-dsh-part='tab-menu-favorite']:hover {
+    background: color-mix(in srgb, var(--fav-accent) 10%, transparent);
+  }
+}
+
+/* --- The favorites trigger ----------------------------------------------- */
+
+/*
+ * The last child of the bar and a sibling of the scrolling row, so it keeps to
+ * the row's right edge while the tabs scroll under it. Separation from the last
+ * tab is the bar's own 6px gap — the same rhythm the tabs use among themselves,
+ * and no divider on top of it.
+ *
+ * Shaped like a bookmark-bar control rather than a block: a quiet icon-and-label
+ * button, a rounded highlight on hover, and an accent-tinted bed while the drawer
+ * is open (`aria-expanded`). Its accent is constant, though — the star and the
+ * hairline around the button are blue at rest — because it is the one control
+ * in an otherwise neutral bar that belongs to the favorites family, and that
+ * has to be visible before anyone hovers it.
+ */
+.barButton {
+  display: inline-flex;
+  align-items: center;
+  align-self: center;
+  justify-content: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  /* Neutral fallback: the accent tint lands in `@supports` below. */
+  border: 1px solid var(--dsw-alias-border-l1, #e5e5e5);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #666);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  user-select: none;
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+/* The bed stays neutral on hover — the star is the only constant accent — and
+   the text steps up to primary so the label never rides on accent-on-accent. */
+.barButton:hover {
+  color: var(--dsw-alias-label-primary, #111);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+}
+
+.barButton[aria-expanded='true'] {
+  color: var(--fav-accent);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  border-color: var(--dsw-alias-border-l1, #e5e5e5);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  /* The hairline that frames the trigger, from faintest at rest to clearest
+     while its drawer is open. Mixed from the accent, so the light and the dark
+     theme each resolve it against their own surface. */
+  .barButton {
+    border-color: color-mix(in srgb, var(--fav-accent) 22%, transparent);
+  }
+
+  .barButton:hover {
+    border-color: color-mix(in srgb, var(--fav-accent) 32%, transparent);
+  }
+
+  /* Activation is a wash of the accent, not a solid fill: one step past the
+     hover bed, still a token-derived value. */
+  .barButton[aria-expanded='true'] {
+    background: color-mix(in srgb, var(--fav-accent) 12%, transparent);
+    border-color: color-mix(in srgb, var(--fav-accent) 40%, transparent);
+  }
+}
+
+.barButtonLabel {
+  white-space: nowrap;
+}
+
+/* --- The favorites drawer ------------------------------------------------ */
+
+/*
+ * A compact panel, not a full-height column: the width stays in the 192-208px
+ * band (a bookmark list, not a second sidebar), and the height follows the
+ * content — `max-height` plus the list's own scroll keeps the drawer from
+ * running to the bottom of the screen. The elevation is the lightest the shell
+ * provides, so it reads as a popover rather than a card pasted over the
+ * conversation.
+ *
+ * Top of the stack, above both the bar and the tab menu: the drawer hangs from
+ * the bar's right end and is the surface being read while it is open, so a tab
+ * left hovering behind it must never cut through the panel.
+ */
+.favPanel {
+  position: fixed;
+  z-index: 2147483003;
+  /* `right` and `top` come from the component: they follow the trigger in the
+     strip. No `bottom`: a fixed box with both `top` and `bottom` stretches. */
+  width: 200px;
+  max-width: calc(100vw - 24px);
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  box-sizing: border-box;
+  padding: 8px 6px 8px 8px;
+  background: var(--dsw-alias-bg-overlay, #fff);
+  border: 1px solid var(--dsw-alias-border-l1, #e5e5e5);
+  border-radius: 10px;
+  /* Plain token first; the mixed variant only where it is supported. */
+  box-shadow: 0 2px 8px var(--dsw-alias-border-l1, #e5e5e5);
+  color: var(--dsw-alias-label-primary, #111);
+  font-size: 12px;
+  outline: none;
+  overflow: hidden;
+  animation: favorites-in 180ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  /* The panel keeps its paper surface; only the one-pixel edge takes the
+     accent, so the drawer reads as belonging to the favorites family without
+     being filled with color. */
+  .favPanel {
+    border-color: color-mix(in srgb, var(--fav-accent) 18%, transparent);
+    box-shadow: 0 3px 10px color-mix(in srgb, var(--dsw-alias-label-primary, #111) 10%, transparent);
+  }
+}
+
+@keyframes favorites-in {
+  from {
+    transform: translateX(16px);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+.favHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+  /* Inset from the panel's own edge and lifted off the first row: the star used
+     to lean straight onto the list, which is what made the header read as
+     cramped. The panel's 6px gap then finishes the separation. */
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, #e5e5e5);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  /* A hairline of the accent rather than a neutral section break: this is the
+     one decorative line in the panel, and it is what tells the drawer apart
+     from any other popover at a glance. 32% stays a line, not a band. */
+  .favHead {
+    border-bottom-color: color-mix(in srgb, var(--fav-accent) 32%, transparent);
+  }
+}
+
+.favTitle {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--fav-accent);
+}
+
+/* The empty state names both entry points: the star above, the tab menu. */
+.favEmpty {
+  margin: 0;
+  padding: 2px;
+  color: var(--dsw-alias-label-secondary, #888);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/*
+ * The scroll area of a content-sized panel: it owns the overflow so a long
+ * bookmark list scrolls inside the drawer instead of growing it. Rows sit 2px
+ * apart — adjacent hover beds should not read as one block.
+ */
+.favList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: thin;
+}
+
+/*
+ * A bookmark row, not a card: flat at rest, one rounded highlight on hover, and
+ * an accent wash for the session in view. The horizontal 8px keeps the row's bed
+ * on the panel's own side inset, the 6px vertical keeps the row at 30px (its
+ * 16px remove target sets the content height) so a long list still fits the
+ * panel's 60vh budget.
+ */
+.favItem {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #666);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 140ms ease,
+    color 140ms ease,
+    opacity 140ms ease;
+}
+
+.favItem:hover {
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  color: var(--dsw-alias-label-primary, #111);
+}
+
+.favItem[data-active='1'] {
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+  color: var(--dsw-alias-label-primary, #111);
+}
+
+@supports (color: color-mix(in srgb, transparent, transparent)) {
+  /* The current session keeps its bed on hover too (this rule comes after the
+     hover one, same specificity), so it never looks deselected mid-click. The
+     wash is one step stronger than the neutral hover bed, so "you are here"
+     and "you are hovering" never trade places. */
+  .favItem[data-active='1'] {
+    background: color-mix(in srgb, var(--fav-accent) 14%, transparent);
+  }
+}
+
+/* A bookmarked session that is gone still lists: dimmed, struck through. */
+.favItem[data-stale='1'] .favItemLabel {
+  text-decoration: line-through;
+  opacity: 0.65;
+}
+
+.favItem[data-dragging='1'] {
+  opacity: 0.4;
+}
+
+/* Vertical list: the insertion edge is a horizontal line, top or bottom. */
+.favItem[data-drop='before'] {
+  box-shadow: inset 0 2px 0 0 var(--fav-accent);
+}
+
+.favItem[data-drop='after'] {
+  box-shadow: inset 0 -2px 0 0 var(--fav-accent);
+}
+
+.favItemLabel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/*
+ * The star: one polygon for both glyphs, so the shape can never drift. Drawn
+ * with clip-path — no glyph, no font dependency, no emoji.
+ */
+.starGlyph,
+.favStar {
+  display: block;
+  flex: none;
+  background: currentColor;
+  clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);
+}
+
+.starGlyph {
+  width: 1em;
+  height: 1em;
+}
+
+/*
+ * The trigger's star carries the accent at rest, not only while the drawer is
+ * open: it is the standing bookmark mark of a bar that is otherwise neutral, and
+ * that is what makes the button read as "favorites" before it is hovered. The
+ * label keeps the text tokens, so the accent never has to sit on top of itself.
+ */
+.barButton .starGlyph {
+  color: var(--fav-accent);
+}
+
+.favStar {
+  width: 10px;
+  height: 10px;
+  color: var(--fav-accent);
+}
+
+/* The drawer's "pin the current session" star, the address-bar star of this GUI. */
+.starButton {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.6em;
+  height: 1.6em;
+  padding: 0;
+  border: none;
+  border-radius: 0.4em;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #888);
+  cursor: pointer;
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.starButton:hover {
+  color: var(--fav-accent);
+  background: var(--dsw-alias-bg-layer-2, #f5f5f5);
+}
+
+.starButton[data-favorite='1'] {
+  color: var(--fav-accent);
+}
+
+/* Revealed on hover/focus only: the row stays quiet while you read. */
+.favRemove {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  line-height: 14px;
+  text-align: center;
+  font-size: 12px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--dsw-alias-label-secondary, #888);
+  cursor: pointer;
+  opacity: 0;
+  transition: color 140ms ease, background-color 140ms ease, opacity 140ms ease;
+}
+
+.favItem:hover .favRemove,
+.favItem:focus-within .favRemove {
+  opacity: 1;
+}
+
+.favRemove:hover {
+  color: var(--dsw-alias-state-error-primary, #dc2626);
+  background: var(--dsw-alias-bg-layer-2, #eee);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .runSpinner {
+    animation: none;
+  }
+
+  .favPanel {
+    animation: none;
+  }
+
+  .bar,
+  .tab,
+  .menuItem,
+  .barButton,
+  .favItem,
+  .starButton,
+  .favRemove {
+    transition: none;
+  }
+}

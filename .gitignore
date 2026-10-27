@@ -1,0 +1,15 @@
+node_modules
+*.tgz
+
+# 派发台留下的本地运行日志，不属于仓库
+collab/
+
+# 派发任务包（一次性脚手架，不属于插件本体）
+TASK-*.md
+
+# 系统与编辑器
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
