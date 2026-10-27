@@ -1,0 +1,28 @@
+AGENTS.md
+  h_12a30d08a0ab29 115-123
+COMPETITIVE-ANALYSIS.md
+  h_12a30d08a0ab29 1-244
+lib/client.js
+  h_12a30d08a0ab29 1700-1701,2280-2281
+lib/client.js.map
+  h_12a30d08a0ab29 1
+src/client/FavoritesPanel.tsx
+  h_12a30d08a0ab29 468-471
+src/client/RecentTabs.tsx
+  h_12a30d08a0ab29 441-444
+tests/favorites-folders.spec.tsx
+  h_12a30d08a0ab29 407-433
+tests/rename.spec.tsx
+  h_12a30d08a0ab29 488-492,496-497,501-527
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "0aec6373d3fdb866e76bf09f1ab33b8cfe8f3938",
+  "prompts": {},
+  "humans": {
+    "h_12a30d08a0ab29": {
+      "author": "蔡鸣铭 <caimingming@eccom.com.cn>"
+    }
+  }
+}
