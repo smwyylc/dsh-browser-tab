@@ -404,6 +404,33 @@ describe('favorites folders', () => {
     expect(controller.getSnapshot().favorites[1]).toMatchObject({ title: 'Work' })
   })
 
+  it('keeps the folder editor open when a spurious blur arrives', () => {
+    const { controller } = setup({
+      s1: { title: 'Alpha', retainedBy: { mainView: 1 } },
+      s2: { title: 'Beta' },
+      s3: { title: 'Gamma' },
+    }, SEEDED_TREE)
+
+    act(() => {
+      folderRow('Work').querySelector('[class*="favItemLabel"]')!
+        .dispatchEvent(new MouseEvent('dblclick', { bubbles: true }))
+    })
+    const input = host.querySelector<HTMLInputElement>('input')!
+    typeInto(input, 'Draft')
+    // The shell re-fires blur a few frames after focus lands, without moving
+    // the caret: focusout alone leaves activeElement on the editor, so this is
+    // the spurious shape and must not count as a dismissal.
+    act(() => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true })) })
+
+    expect(document.activeElement).toBe(input)
+    // Still in its editing shape: the row shows the input, not the label span.
+    expect(host.querySelector('input')).toBe(input)
+    expect(folderRows()).toHaveLength(1)
+    expect(folderRows()[0].querySelector('input')).toBe(input)
+    // And the folder kept the name it had.
+    expect(controller.getSnapshot().favorites[1]).toMatchObject({ title: 'Work' })
+  })
+
   it('adds a root folder from the header button and opens the editor on it', () => {
     const { controller } = setup({
       s1: { title: 'Alpha', retainedBy: { mainView: 1 } },

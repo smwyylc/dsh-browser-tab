@@ -438,7 +438,10 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
               setDraft(event.target.value)
             }}
             onKeyDown={onEditorKeyDown}
-            onBlur={() => {
+            onBlur={(event) => {
+              // The shell fires a spurious blur on the focused element a few frames after
+              // focus lands; the caret never left, so this is not a real dismissal.
+              if (document.activeElement === event.target) return
               const id = editingRef.current
               if (id !== undefined) void commitRename(id, draftRef.current)
             }}
