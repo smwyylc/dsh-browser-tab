@@ -175,8 +175,16 @@ flicker when the strip was a dynamic plugin.
 
 ## Install
 
+From npm, or from any plugin market that indexes it:
+
 ```sh
-dsh plugin --profile web add link:<repo>/packages/dsh-recent-tabs
+dsh plugin --profile web add dsh-recent-tabs
+```
+
+Or from a checkout, as a local bundle:
+
+```sh
+dsh plugin --profile web add link:<repo>/my-plugins/dsh-recent-tabs
 ```
 
 Then restart the profile so the Host half registers.
