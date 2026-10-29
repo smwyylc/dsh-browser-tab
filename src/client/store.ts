@@ -23,7 +23,14 @@
  * live GUI. The React surface only reads this store through subscribe().
  */
 
-/** Storage key of the persisted ledger. */
+/**
+ * Storage key of the persisted ledger.
+ *
+ * Deliberately NOT renamed with the package (2026-10-29, `dsh-recent-tabs` ->
+ * `dsh-browser-tab`): this key is the user's data. Renaming it would orphan every
+ * tab, favorite and closed-history row already in the browser and start from an
+ * empty ledger, so the old name is kept on purpose and must stay.
+ */
 export const STORAGE_KEY = 'dsh-recent-tabs-v1'
 
 /**

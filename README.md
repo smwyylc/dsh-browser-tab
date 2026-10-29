@@ -1,4 +1,4 @@
-# dsh-recent-tabs
+# dsh-browser-tab
 
 English | [中文](README.zh.md)
 
@@ -230,13 +230,13 @@ flicker when the strip was a dynamic plugin.
 From npm, or from any plugin market that indexes it:
 
 ```sh
-dsh plugin --profile web add dsh-recent-tabs
+dsh plugin --profile web add dsh-browser-tab
 ```
 
 Or from a checkout, as a local bundle:
 
 ```sh
-dsh plugin --profile web add link:<repo>/my-plugins/dsh-recent-tabs
+dsh plugin --profile web add link:<repo>/my-plugins/dsh-browser-tab
 ```
 
 Then restart the profile so the Host half registers.
@@ -244,9 +244,9 @@ Then restart the profile so the Host half registers.
 ## Local checks
 
 ```sh
-pnpm --filter dsh-recent-tabs typecheck
-pnpm --filter dsh-recent-tabs test
-pnpm --filter dsh-recent-tabs build
+pnpm --filter dsh-browser-tab typecheck
+pnpm --filter dsh-browser-tab test
+pnpm --filter dsh-browser-tab build
 ```
 
 ## Limits
