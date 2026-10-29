@@ -1,4 +1,4 @@
-# AGENTS.md — dsh-recent-tabs
+# AGENTS.md — dsh-browser-tab
 
 DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、手动关闭）与从条右端
 下沉的收藏夹抽屉（条内最右端按钮开合、标签右键收藏、Chrome 式收藏文件夹）。包级规则：
@@ -201,7 +201,7 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
 ## 提交前检查
 
 ```sh
-pnpm --filter dsh-recent-tabs typecheck
-pnpm --filter dsh-recent-tabs test
-pnpm --filter dsh-recent-tabs build
+pnpm --filter dsh-browser-tab typecheck
+pnpm --filter dsh-browser-tab test
+pnpm --filter dsh-browser-tab build
 ```

@@ -31,12 +31,12 @@ import { ClosedHistoryPanel } from './ClosedHistoryPanel.tsx'
 import { en, setTranslator, zh, type RecentTabsKey } from './locales.ts'
 
 /** Locale namespace this plugin owns. */
-const NS = 'dsh-recent-tabs'
+const NS = 'dsh-browser-tab'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
   interface LocaleNamespaceMap {
     /** recent-tabs surface copy. */
-    'dsh-recent-tabs': RecentTabsKey
+    'dsh-browser-tab': RecentTabsKey
   }
 }
 

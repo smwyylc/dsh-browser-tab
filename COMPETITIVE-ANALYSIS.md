@@ -1,4 +1,4 @@
-# dsh-recent-tabs 竞品分析
+# dsh-browser-tab 竞品分析
 
 - 日期：2026-10-27
 - 范围：DSH 官方市场目录中的同类与相邻插件（A 直接同类 / B 相邻 / C 外部参照系），
@@ -49,7 +49,7 @@
 `dsh-session-deck`（置顶带+分区+铃铛）、`@ai-eks/dsh-docking-layout`（标签页+拖拽分组）、
 Chrome 标签栏+书签栏（外部）、VS Code OPEN EDITORS + Recent（外部）。
 
-| 能力 | dsh-recent-tabs | session-navigator | session-deck | docking-layout | Chrome 标签+书签 | VS Code 打开/最近 |
+| 能力 | dsh-browser-tab | session-navigator | session-deck | docking-layout | Chrome 标签+书签 | VS Code 打开/最近 |
 | --- | --- | --- | --- | --- | --- | --- |
 | 最近会话自动收集 | 有：打开即入条，首次见到排序 | 有：直接呈现全集，非「打开过」 | 有：全集 + 置顶带 | 有：每个对话成为一个标签 | 部分：标签栏收集，书签栏不收集 | 有：OPEN EDITORS 随打开而增 |
 | 打开集合自持（关掉即移出，不被全集回填） | 有：成员资格只认快照，失效也不回填 | 无：视图是全集/归档的投影† | 部分：置顶带持久，其余是全集† | 有：标签即打开集合† | 有：标签栏与书签栏是两套 | 有：关掉编辑器即从列表消失 |
