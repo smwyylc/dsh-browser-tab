@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RecentTabsController } from '../src/client/controller.ts'
-import { STORAGE_KEY, type TabStorage } from '../src/client/store.ts'
+import { MAX_CLOSED, STORAGE_KEY, type TabStorage } from '../src/client/store.ts'
 
 /** Minimal in-memory storage double that counts canonical-key writes. */
 function memoryStorage(initial?: string): TabStorage & { value: string | null; writes: number } {
@@ -22,6 +22,7 @@ function memoryStorage(initial?: string): TabStorage & { value: string | null; w
 function persisted(storage: { value: string | null }): {
   tabs: { id: string }[]
   favorites: { id: string; title: string }[]
+  closed: { id: string; title: string; closedAt: number }[]
 } {
   return JSON.parse(storage.value ?? 'null')
 }
@@ -63,6 +64,7 @@ describe('RecentTabsController', () => {
     expect(persisted(storage)).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }, { id: 'b', title: 'Beta' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [],
     })
   })
 
@@ -76,7 +78,11 @@ describe('RecentTabsController', () => {
 
     expect(listener).toHaveBeenCalledTimes(1)
     expect(storage.writes).toBe(1)
-    expect(persisted(storage)).toEqual({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [] })
+    expect(persisted(storage)).toEqual({
+      tabs: [{ id: 'a', title: 'Alpha' }],
+      favorites: [],
+      closed: [],
+    })
   })
 
   it('does NOT notify or persist when the observation changes nothing', () => {
@@ -136,6 +142,8 @@ describe('RecentTabsController', () => {
     expect(persisted(storage)).toEqual({
       tabs: [{ id: 'b', title: 'Beta' }],
       favorites: [{ id: 'a', title: 'Alpha' }],
+      // Closing the tab also lands in the history, with the title it showed.
+      closed: [{ id: 'a', title: 'Alpha', closedAt: expect.any(Number) }],
     })
     // The bookmark survives a reload of the same storage.
     expect(new RecentTabsController(storage).getSnapshot().favorites).toEqual([
@@ -267,6 +275,7 @@ describe('RecentTabsController ordering and favorites', () => {
     expect(persisted(storage)).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'a', title: 'Alpha' }],
+      closed: [],
     })
     // The tab row keeps no favorite field, and the strip order is untouched.
     expect(controller.getSnapshot().tabs).toEqual([{ id: 'a', title: 'Alpha' }])
@@ -274,7 +283,11 @@ describe('RecentTabsController ordering and favorites', () => {
     controller.toggleFavorite('a')
 
     expect(listener).toHaveBeenCalledTimes(2)
-    expect(persisted(storage)).toEqual({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [] })
+    expect(persisted(storage)).toEqual({
+      tabs: [{ id: 'a', title: 'Alpha' }],
+      favorites: [],
+      closed: [],
+    })
     expect(controller.getSnapshot().tabs).toEqual([{ id: 'a', title: 'Alpha' }])
   })
 
@@ -295,6 +308,7 @@ describe('RecentTabsController ordering and favorites', () => {
     expect(persisted(storage)).toEqual({
       tabs: [],
       favorites: [{ id: 'session-abcdef', title: 'session-' }],
+      closed: [],
     })
   })
 
@@ -551,5 +565,112 @@ describe('RecentTabsController folders', () => {
     ])
     // Reading it back is not a migration: nothing was rewritten.
     expect(storage.writes).toBe(3)
+  })
+})
+
+describe('RecentTabsController closed history', () => {
+  it('records a hand-closed tab with the title it showed, newest first', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    controller.record('a', 'Alpha')
+    controller.record('b', 'Beta')
+
+    controller.remove('a')
+
+    expect(controller.getSnapshot().closed).toEqual([
+      { id: 'a', title: 'Alpha', closedAt: expect.any(Number) },
+    ])
+    // The strip is the membership source: the row is gone, the history has it.
+    expect(controller.getSnapshot().tabs.map(tab => tab.id)).toEqual(['b'])
+
+    controller.remove('b')
+
+    expect(controller.getSnapshot().closed.map(row => row.id)).toEqual(['b', 'a'])
+    expect(persisted(storage).closed.map(row => row.id)).toEqual(['b', 'a'])
+    expect(persisted(storage).closed[0].title).toBe('Beta')
+  })
+
+  it('takes a session back out as soon as it is opened again', () => {
+    const controller = new RecentTabsController(memoryStorage())
+    controller.record('a', 'Alpha')
+    controller.remove('a')
+    expect(controller.getSnapshot().closed).toHaveLength(1)
+
+    controller.record('a', 'Alpha')
+
+    expect(controller.getSnapshot().closed).toEqual([])
+    expect(controller.getSnapshot().tabs.map(tab => tab.id)).toEqual(['a'])
+  })
+
+  it('notifies and persists when only the history changed', () => {
+    // A stored record can hold the same id in both buckets only if something
+    // else wrote it; re-opening it must still drop the history row even though
+    // the tab list and the activation order come back unchanged.
+    const storage = memoryStorage(JSON.stringify({
+      tabs: [{ id: 'a', title: 'Alpha' }],
+      favorites: [],
+      closed: [{ id: 'a', title: 'Alpha', closedAt: 1 }],
+    }))
+    const controller = new RecentTabsController(storage)
+    const before = controller.getSnapshot()
+    const listener = vi.fn()
+    controller.subscribe(listener)
+
+    controller.record('a', 'Alpha')
+
+    expect(listener).toHaveBeenCalledTimes(1)
+    expect(controller.getSnapshot()).not.toBe(before)
+    expect(controller.getSnapshot().closed).toEqual([])
+    expect(persisted(storage).closed).toEqual([])
+  })
+
+  it('keeps one row when the same session is closed twice', () => {
+    const controller = new RecentTabsController(memoryStorage())
+    controller.record('a', 'Alpha')
+    controller.remove('a')
+    controller.record('a', 'Alpha')
+    controller.remove('a')
+
+    expect(controller.getSnapshot().closed).toEqual([
+      { id: 'a', title: 'Alpha', closedAt: expect.any(Number) },
+    ])
+  })
+
+  it('does not record a removal that changed nothing', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    controller.record('a', 'Alpha')
+    const writesBefore = storage.writes
+
+    controller.remove('zzz')
+
+    expect(controller.getSnapshot().closed).toEqual([])
+    expect(storage.writes).toBe(writesBefore)
+  })
+
+  it('caps the history at MAX_CLOSED closes', () => {
+    const controller = new RecentTabsController(memoryStorage())
+    for (let i = 0; i < MAX_CLOSED + 2; i += 1) controller.record(`s${i}`, `T${i}`)
+    for (let i = 0; i < MAX_CLOSED + 2; i += 1) controller.remove(`s${i}`)
+
+    const closed = controller.getSnapshot().closed
+    expect(closed).toHaveLength(MAX_CLOSED)
+    expect(closed[0].id).toBe(`s${MAX_CLOSED + 1}`)
+    expect(closed.some(row => row.id === 's0')).toBe(false)
+  })
+
+  it('keeps the history across a reload', () => {
+    const storage = memoryStorage()
+    const controller = new RecentTabsController(storage)
+    controller.record('a', 'Alpha')
+    controller.remove('a')
+    const writes = storage.writes
+
+    const reloaded = new RecentTabsController(storage)
+
+    expect(reloaded.getSnapshot().closed.map(row => row.id)).toEqual(['a'])
+    expect(reloaded.getSnapshot().closed[0].title).toBe('Alpha')
+    // Reading it back is not a migration: nothing was rewritten.
+    expect(storage.writes).toBe(writes)
   })
 })

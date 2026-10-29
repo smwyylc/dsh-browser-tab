@@ -26,6 +26,11 @@ export declare const zh: {
     'fav.folderRename': string;
     'menu.favorite': string;
     'menu.unfavorite': string;
+    'hist.button': string;
+    'hist.panelTitle': string;
+    'hist.empty': string;
+    'hist.dead': string;
+    'hist.reopen': string;
     'rename.label': string;
     'rename.failed': string;
 };

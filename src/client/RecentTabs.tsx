@@ -17,10 +17,15 @@
  * favorites collection — never to the tab row, so closing the tab keeps the
  * bookmark.
  *
- * The bar is also the drawer's anchor, so the two are coupled in one direction:
- * while the drawer is open the bar is held on screen even with the pointer far
- * away, because a parked bar would put the button (and thus the anchor) above
- * the viewport.
+ * The bar carries TWO tail triggers and is the anchor of both popovers they
+ * open: the favorites drawer (`FavoritesPanel.tsx`) and the recently-closed
+ * drawer (`ClosedHistoryPanel.tsx`). The two are mutually exclusive at the
+ * state-module level, so only one of them can hold the bar down at a time.
+ *
+ * The bar is also each drawer's anchor, so they are coupled in one direction:
+ * while either drawer is open the bar is held on screen even with the pointer
+ * far away, because a parked bar would put the buttons (and thus the anchors)
+ * above the viewport.
  *
  * Migrated for dsh `0.1.6-alpha.2` (see `sessions-face.ts` for the contract
  * changes): the current session is now read off local retention
@@ -47,7 +52,9 @@ import type { SessionsLike, UiWorkspaceLike } from './sessions-face.ts'
 import { useSessionView } from './use-current-session.ts'
 import { placeFor } from './drag-place.ts'
 import { isFavoritesOpen, subscribeFavoritesOpen } from './fav-drawer-state.ts'
+import { isClosedHistoryOpen, subscribeClosedHistoryOpen } from './hist-drawer-state.ts'
 import { FavoriteButton } from './FavoriteButton.tsx'
+import { ClosedHistoryButton } from './ClosedHistoryButton.tsx'
 import { t } from './locales.ts'
 import css from './recent-tabs.module.css'
 
@@ -124,19 +131,23 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   const [open, setOpen] = useState(false)
   const hide = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  // --- Favorites drawer holds the bar up -----------------------------------
-  /** Drawer open state, mirrored from the module-level observable. */
+  // --- A drawer holds the bar up -------------------------------------------
+  /** Favorites drawer open state, mirrored from the module-level observable. */
   const favoritesOpen = useSyncExternalStore(subscribeFavoritesOpen, isFavoritesOpen)
-  /** Read by the hide timer, which must not retract from under the drawer. */
-  const drawerOpenRef = useRef(favoritesOpen)
-  /** Whether the pointer is on the bar right now (closing the drawer by button). */
+  /** Recently-closed drawer open state, its own observable. */
+  const historyOpen = useSyncExternalStore(subscribeClosedHistoryOpen, isClosedHistoryOpen)
+  /** Either drawer open: both hang off this bar, and both need its button. */
+  const drawerOpen = favoritesOpen || historyOpen
+  /** Read by the hide timer, which must not retract from under a drawer. */
+  const drawerOpenRef = useRef(drawerOpen)
+  /** Whether the pointer is on the bar right now (closing a drawer by button). */
   const hoverRef = useRef(false)
   /** Tracks the open -> closed edge, so the 260ms timer only restarts once. */
-  const drawerWasOpen = useRef(favoritesOpen)
+  const drawerWasOpen = useRef(drawerOpen)
 
   useEffect(() => {
-    drawerOpenRef.current = favoritesOpen
-  }, [favoritesOpen])
+    drawerOpenRef.current = drawerOpen
+  }, [drawerOpen])
 
   const clearHide = useCallback((): void => {
     if (hide.current !== undefined) {
@@ -166,27 +177,27 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
     hide.current = setTimeout(() => {
       hide.current = undefined
       if (menuOpenRef.current) return
-      // The drawer hangs off this bar: retracting would take its anchor with it.
+      // A drawer hangs off this bar: retracting would take its anchor with it.
       if (drawerOpenRef.current) return
       setOpen(false)
     }, 260)
   }, [clearHide])
 
-  // The bar carries the drawer's anchor, and a parked bar puts that anchor
-  // above the viewport. So opening the drawer pulls the bar down and keeps it
-  // there; closing it hands the bar back to the ordinary 260ms timer.
+  // The bar carries both drawers' anchors, and a parked bar puts those anchors
+  // above the viewport. So opening either drawer pulls the bar down and keeps
+  // it there; closing it hands the bar back to the ordinary 260ms timer.
   useEffect(() => {
-    if (favoritesOpen) {
+    if (drawerOpen) {
       drawerWasOpen.current = true
       show()
       return
     }
     if (!drawerWasOpen.current) return
     drawerWasOpen.current = false
-    // Closed through the button: the pointer is still on the bar, so leave it
+    // Closed through a button: the pointer is still on the bar, so leave it
     // up until it leaves on its own.
     if (!hoverRef.current) scheduleHide()
-  }, [favoritesOpen, scheduleHide, show])
+  }, [drawerOpen, scheduleHide, show])
 
   useEffect(() => clearHide, [clearHide])
 
@@ -534,7 +545,7 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
       />
       <div
         className={css.bar}
-        data-open={open || favoritesOpen ? '1' : '0'}
+        data-open={open || drawerOpen ? '1' : '0'}
         data-dsh-plugin="recent-tabs"
         data-dsh-part="bar"
         title={snapshot.tabs.length > 0 ? t('tab.dragHint') : undefined}
@@ -551,8 +562,10 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
           {rows.length > 0 ? rows : <span className={css.empty}>{t('bar.empty')}</span>}
         </div>
         {error !== undefined ? <span className={css.error} role="alert">{error}</span> : null}
-        {/* Last child, outside the scrolling row: the trigger stays at the right
-            end of the bar while the tabs scroll under it. */}
+        {/* Both last children, outside the scrolling row: the two triggers stay
+            at the right end of the bar while the tabs scroll under them, the
+            history one just left of the favorites one. */}
+        <ClosedHistoryButton />
         <FavoriteButton />
       </div>
       {/* Outside the bar on purpose: the bar is transformed, which would make it

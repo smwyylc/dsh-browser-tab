@@ -1,14 +1,16 @@
 /**
  * Browser-half entry for the recent-tabs plugin.
  *
- * Registers the locale dictionaries and mounts two surfaces:
+ * Registers the locale dictionaries and mounts three surfaces:
  *   - the tab strip, in the frame-wide overlay slot (`shell.overlay`), where it
  *     sits above every column and outside their scroll containers. The
- *     favorites button is rendered by the strip itself, at the right end of the
- *     same row, so it is not a registration of its own;
- *   - the favorites drawer, in the same overlay slot as the strip.
+ *     recently-closed and favorites buttons are rendered by the strip itself,
+ *     at the right end of the same row, so they are not registrations of their
+ *     own;
+ *   - the favorites drawer, in the same overlay slot as the strip;
+ *   - the recently-closed drawer, also in that slot, a sibling of both.
  *
- * Both seats are additive list entries: nothing here replaces shipped UI.
+ * All three seats are additive list entries: nothing here replaces shipped UI.
  *
  * Failure policy: mounting problems are logged, never thrown — the web shell
  * fails the whole boot when a plugin apply throws, and an external plugin must
@@ -25,6 +27,7 @@ import './shell-overlay-slot.ts'
 import { RecentTabsController } from './controller.ts'
 import { RecentTabs } from './RecentTabs.tsx'
 import { FavoritesPanel } from './FavoritesPanel.tsx'
+import { ClosedHistoryPanel } from './ClosedHistoryPanel.tsx'
 import { en, setTranslator, zh, type RecentTabsKey } from './locales.ts'
 
 /** Locale namespace this plugin owns. */
@@ -91,5 +94,18 @@ export function apply(ctx: ClientContext): void {
     }, () => createElement(FavoritesPanel, { controller, ctx })))
   } catch (error) {
     console.warn('[recent-tabs] favorites mount failed:', error)
+  }
+
+  try {
+    // Third seat, same list slot: the recently-closed drawer is a sibling of
+    // the strip and the favorites drawer, so no registration can hide another.
+    ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+      name: 'shell.overlay',
+      id: 'recent-tabs-history',
+      order: 102,
+      label: () => translate('hist.panelTitle'),
+    }, () => createElement(ClosedHistoryPanel, { controller, ctx })))
+  } catch (error) {
+    console.warn('[recent-tabs] closed-history mount failed:', error)
   }
 }

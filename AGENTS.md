@@ -21,8 +21,8 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   会话列表或任何派生副本回填——否则会出现"关不掉"的 tab（旧副本把已删项 record 回来）。
   抽屉同理只取 `snapshot.favorites`，不要再从 `tabs` 里筛收藏（那正是关掉 tab 连带丢收藏
   的老 bug）。
-- **关掉当前 tab 走 MRU 回退**：`controller.remove(id)` 返回下一个应激活的会话
-  （`nextActiveAfterClose`：激活顺序优先，其次保留列表）。激活顺序是内存态、不持久化，
+- **关掉当前 tab 走 MRU 回退**：`controller.remove(id)` 先把该行的显示名写进 `closed`（唯一记录点），
+  再返回下一个应激活的会话（`nextActiveAfterClose`：激活顺序优先，其次保留列表）。激活顺序是内存态、不持久化，
   构造时用存储列表播种。仅 `live.current === id` 时才跳转。
 - **重命名改的是会话，不是 tab 显示名**：先走 `ctx.sessions.binding(id)?.session.rename(title)`；
   该行没有 bind（只有别人持有 generation 时才存在）时借一个：
@@ -36,12 +36,26 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   原样透传——`touchOrder` / `dropOrder` / `nextActiveAfterClose` 的语义不变，所以拖完再关
   当前 tab 仍回退到上一次用过的那个。
 - **收藏是独立集合，不是 tab 行上的字段**：`store.ts` 里 `favorites: FavoriteNode[]` 与
-  `tabs: RecentTab[]` 平级，落盘形状是 `{ tabs, favorites }`（同键 `dsh-recent-tabs-v1`）。
+  `tabs: RecentTab[]` 平级，落盘形状是 `{ tabs, favorites, closed }`（同键 `dsh-recent-tabs-v1`）。
   `favorites` 是收藏树的**根层**（根层可以同时有收藏项与文件夹），`FavoriteNode` =
   `FavoriteEntry | FavoriteFolder`，文件夹靠 `children` 区分（`isFolder`）。
   `removeTab` / `controller.remove` 只删 tab 行、**永远不碰 favorites**——「在顶部条关掉标签
   不丢收藏」就靠这条；`toggleFavorite` / `moveFavorite` 只动收藏树，不动 tab 行序与激活
   顺序，所以 tab 条里没有收藏分组、也没有 `data-favorite` 分组样式。
+- **最近关闭是第三个集合**：`closed: ClosedTab[]`（`{ id, title, closedAt }`）与 `tabs` /
+  `favorites` 平级，`MAX_CLOSED = 10`，顺序**最新在前**。它记的是「事件」不是「成员资格」：
+  **只有 `controller.remove`（即标签上的 ×）会写它**，会话自己结束、失效被清、`recordTab` 的
+  `MAX_TABS` 淘汰都不算；反过来 `recordTab` 记录一个会话时要把该 id 从 `closed` 摘掉
+  （`dropClosed`），所以同一个会话不会同时出现在条子和历史里。`recordClosed` 幂等（同一
+  id 且标题不变时返回同一个引用、不落盘），同一 id 再关一次是「删旧置顶」而不是两条。
+  旧数据读不到 `closed` 时按 `[]` 处理、**不迁移也不写回**；`saveLedger` 三份一起写。
+- **最近关闭的面是条尾按钮 + 抽屉**：`ClosedHistoryButton` 复用 `css.barButton`，但配色**中性**
+  （`bg-layer-*` / `border-l*` / `label-*`），**不跟收藏夹抢那抹蓝**；图标是 `.histGlyph`
+  （clip-path 画的左向箭头，1em 见方，与星标同 footprint），不要复用 `.starGlyph`。
+  `ClosedHistoryPanel` 与 `FavoritesPanel` 同族（200px 宽、`max-height: min(60vh, 520px)`、
+  列表自己滚动、`role="dialog"`、`data-dsh-part="closed-history"`），行是 `<button>`：
+  点击 = `uiWorkspace.openSession(id)` 且**只有这一个副作用**；会话失效时行仍列出、置灰、
+  `disabled`。抽屉类名一律 `hist` 前缀，**不能含 `tab` 子串**。
 - **收藏夹是 Chrome 式树，可以做文件夹**：`createFolder(parentId?, title?)` 建在根层或某个
   文件夹里（不传 parent 就是根层，空标题用本地化默认名）、`renameFolder`、`removeFolder`（连整棵
   子树一起删，绝不碰 `tabs`）、`moveFavoriteInto`（收藏项追加到目标文件夹末尾）、
@@ -67,9 +81,10 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   形状，再读不写回），改写前把原文照抄到 `dsh-recent-tabs-v1-backup`（已有备份则不覆盖，
   备份失败也要继续迁移）。改 store 时保留 `tests/store.spec.ts` 的迁移用例。
 - **层级是一条链，抽屉在最上**：`.zone` 2147483000 < `.bar` 2147483001 < `.menu`
-  2147483002 < `.favPanel` **2147483003**。抽屉紧贴条右端下沉、又是开着时用户正在看的表面，
-  所以它必须压过条子和标签右键菜单（早期 2147482998 的「抽屉压在条子之下」假设已废弃）；
-  除这四档之外不要引入别的隐式层级依赖。
+  2147483002 < `.favPanel` 2147483003 < `.histPanel` **2147483004**。抽屉紧贴条右端下沉、又是开着时用户正在看的表面，
+  所以它必须压过条子和标签右键菜单（早期 2147482998 的「抽屉压在条子之下」假设已废弃）；两个抽屉
+  互斥、不会同时开着，`.histPanel` 那一档只用来定住切换帧的先后，不要再按它推别的层级。
+  除这五档之外不要引入别的隐式层级依赖。
 - **抽屉是紧凑面板，不许撑满**：`.favPanel` 宽 192–208px（现 200px），
   `max-height: min(60vh, 520px)`，高度随内容、列表区自己 `overflow-y: auto`；不要写
   `bottom: 0`（fixed 同时给 `top`/`bottom` 会被拉满屏），投影只取最轻一档。星标在顶部、
@@ -78,10 +93,10 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   `.dot` 同尺寸同 token）：绿点 = 当前会话，跨表面语义一致，**不要改成收藏家族的蓝**；它落在
   行首（星标左侧），和原有的蓝色淡化底并存，失效行若恰好是当前项两个标记一起出，并带
   `aria-current="true"`。圆点只在抽屉里加，tab 条的 `.dot` 不要动。
-- **顶部条只有一行 tab**：tabs 在滚动区 `.stripRow` 内，收藏按钮在条内**最右端、
-  `.stripRow` 之外**（`.bar` 的最后一个子元素，`flex: 0 0 auto`），条与按钮之间只用
-  条自身的 6px `gap`（与 tab 之间的间距同节奏），不再加分隔线。按钮**不能**跟着
-  `.stripRow` 滚，也不能挪回会话标题栏。收藏面仍是按钮 + 抽屉（`shell.overlay`，
+- **顶部条只有一行 tab**：tabs 在滚动区 `.stripRow` 内，条尾两颗按钮（`最近关闭`、
+  `收藏夹`）都在 `.stripRow` 之外、`flex: 0 0 auto`，从右往左依次是收藏夹、最近关闭；
+  条与按钮之间只用条自身的 6px `gap`（与 tab 之间的间距同节奏），不再加分隔线。按钮**不能**
+  跟着 `.stripRow` 滚，也不能挪回会话标题栏。收藏面仍是按钮 + 抽屉（`shell.overlay`，
   `FavoritesPanel.tsx`）；条内只留 tab 的右键菜单
   （`data-dsh-part="tab-menu"`，单项 `tab-menu-favorite`），点击 = `controller.toggleFavorite(id, title)`
   （标题取该 tab 当前显示名，收藏夹里才有一份可读的落盘标题），不改变 tab 的 click/关闭/拖拽语义。
@@ -91,17 +106,19 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   换算后的像素（`deltaMode` 1 按 16px/行、2 按条宽、其他按原值，`deltaX` 一并计入）。
   **只绑 `.stripRow`，不绑 `.bar`**（否则收藏按钮上的滚轮也会滚标签），条外滚轮一律不拦；
   `deltaY === 0`（纯横向手势）与 `ctrlKey`（触控板捏合缩放）直接放行，不加动画/惯性。
-- **两处注册，按钮不单独占槽位**：`index.ts` 只注册 `shell.overlay` 的 Tab 条与收藏夹抽屉，
-  收藏按钮由 `RecentTabs` 自己渲染。不再挂 `conversation.session.header.utilities`，也不碰
+- **两处注册，按钮不单独占槽位**：`index.ts` 只注册 `shell.overlay` 的三处（Tab 条、
+  收藏夹抽屉、最近关闭抽屉），两颗条尾按钮由 `RecentTabs` 自己渲染。不再挂
+  `conversation.session.header.utilities`，也不碰
   `conversation.session.header.corner`（single 槽位、`replaceRisk: shadows-shipped-ui`）。
-  两处注册各自 `try`/`catch`，挂载失败只 warn。
+  三处注册各自 `try`/`catch`，挂载失败只 warn。
 - **抽屉开着时条子钉住**：条子关闭态是 `translateY(-100%)`，按钮矩形跑到视口上方，抽屉会被
-  锚到屏幕外。`RecentTabs` 订阅 `fav-drawer-state`，抽屉开着就 `data-open='1'` 且 hide 计时器
-  直接 return；抽屉关闭后才恢复原来的 260ms 计时。`FavoritesPanel.measure()` 再把 `top`
-  夹到不小于 8px 兜底。改这条链路时三处一起改，否则抽屉会飞。
-- **抽屉贴按钮矩形定位**：`FavoritesPanel` 用 `[data-dsh-part="favorite-button"]` 找到条内那颗按钮，
-  按 `getBoundingClientRect()` 算 `right = innerWidth - rect.right`、`top = rect.bottom + 6`
-  （`top` 再夹到不小于 8px，防止锚点在屏外时抽屉飞走），
+  锚到屏幕外。`RecentTabs` 同时订阅 `fav-drawer-state` 与 `hist-drawer-state`，任一抽屉开着就
+  `data-open='1'` 且 hide 计时器直接 return；两个都关闭后才恢复原来的 260ms 计时。
+  `FavoritesPanel.measure()` / `ClosedHistoryPanel.measure()` 各把自己的 `top` 夹到不小于 8px 兜底。
+  改这条链路时四处一起改，否则抽屉会飞。
+- **抽屉贴按钮矩形定位**：两个抽屉各自找自己那颗按钮（`[data-dsh-part="favorite-button"]` /
+  `[data-dsh-part="closed-history-button"]`），按 `getBoundingClientRect()` 算
+  `right = innerWidth - rect.right`、`top = rect.bottom + 6`（`top` 再夹到不小于 8px，防止锚点在屏外时抽屉飞走），
   并在打开、`window.resize`、按钮**整条祖先链**（最多 8 层）的 `ResizeObserver` 回调里重算。
   只观察 `parentElement` 跟不上（实测抽屉会压在右栏上）；主面板让出宽度时祖先里必有一个 resize，
   抽屉这才跟着走而不遮官方界面；找不到按钮兜底 `right: 24`。
@@ -109,9 +126,15 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
 - **右键菜单自绘**：`position: fixed` 定在点击处并夹进视口（`.bar` 有 `transform`，固定定位后代
   会被它当包含块裁掉，所以菜单必须渲染成 `.bar` 的兄弟节点），`role="menu"` / `role="menuitem"`，
   点菜单外、Esc、滚动、窗口失焦任一即关。不引官方菜单组件、不抄官方哈希类名。
-- **开合状态是纯 UI 状态**：按钮在条内、抽屉在另一处 slot 注册，共享 `fav-drawer-state.ts` 的模块级
-  observable（`isFavoritesOpen` / `setFavoritesOpen` / `toggleFavoritesOpen` / `subscribeFavoritesOpen`），
+- **开合状态是纯 UI 状态**：按钮在条内、抽屉在另一处 slot 注册，共享 `fav-drawer-state.ts` /
+  `hist-drawer-state.ts` 的模块级 observable（`isFavoritesOpen` / `setFavoritesOpen` /
+  `toggleFavoritesOpen` / `subscribeFavoritesOpen`，以及 `isClosedHistoryOpen` /
+  `setClosedHistoryOpen` / `toggleClosedHistoryOpen` / `subscribeClosedHistoryOpen`），
   **不落盘**、不进 `store.ts`。抽屉关着时 `return null`，不留隐藏 DOM。
+- **两颗条尾按钮互斥**：两个抽屉挂在条的同一端，同一时刻只能开一个。开历史抽屉由
+  `hist-drawer-state.setClosedHistoryOpen(true)` 顺手 `setFavoritesOpen(false)`；反方向由
+  `FavoriteButton` 在点击时先 `setClosedHistoryOpen(false)`（`fav-drawer-state` 不反向 import，
+  免得两个模块成环）。不要改成两个抽屉同时开着，也不要让面板互相去关对方。
 - **外壳会补发伪 blur，行内编辑器的 `onBlur` 必须先验焦点**：真实 GUI 里元素获得焦点后约
   60-110ms，外壳会补发一个 `blur` / `focusout`，但焦点根本没移动（触发时
   `document.activeElement` 仍是那个 input，也没有元素接手焦点，普通 DOM input 与 React 元素
@@ -155,8 +178,8 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   `tests/reorder.spec.tsx` 的 `tabs()` helper 取 `div[class*="tab"]`，容器或菜单壳一旦带 `tab`
   就会被当成 tab 行本身，`tabByText()` 与 `data-active` 断言会直接红。抽屉里新增的类名一律用
   `fav` 前缀（`.favFolder` / `.favChevron` / `.favNewFolder` / `.favDot` / `.favHeadActions`）。
-- **两个表面共用会话视图**：`use-current-session.ts` 导出 `useSessionView(ctx)`（选中项、liveIds、
-  标题、runningIds、completedIds、waitingIds）与 `currentSessionId`，Tab 条与抽屉都用它，不要再各写一份 `reduce`，
+- **三个表面共用会话视图**：`use-current-session.ts` 导出 `useSessionView(ctx)`（选中项、liveIds、
+  标题、runningIds、completedIds、waitingIds）与 `currentSessionId`，Tab 条与两个抽屉都用它，不要再各写一份 `reduce`，
   否则标题与失效判定会漂移。
 - **tab 有三个状态标记**（只出现在 tab 条上，对话流里什么都不画）：回答中在标题前转一个柔和
   蓝色的小圈（`.runSpinner`，`role="img"` + `tab.running`，动画 `run-spin` 在

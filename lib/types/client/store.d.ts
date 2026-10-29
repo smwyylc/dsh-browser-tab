@@ -7,6 +7,12 @@
  * now", a favorite is "kept for later". Closing a tab therefore never touches
  * the favorites collection, and pinning a session never reorders the strip.
  *
+ * A third collection keeps the short history of hand-closed tabs, the way a
+ * browser remembers "recently closed". It is a record of an EVENT rather than a
+ * membership list: only a close button adds to it, a session that leaves the
+ * live list on its own does not, and opening a session takes it back out so the
+ * same id never sits in the strip and in the history at once.
+ *
  * Favorites are a tree rather than a flat list, the way a bookmark manager has
  * folders: `favorites` is its top layer, and a folder is a node that holds
  * bookmark rows and other folders. Every operation here is a function of that
@@ -29,6 +35,8 @@ export declare const STORAGE_KEY = "dsh-recent-tabs-v1";
 export declare const BACKUP_KEY = "dsh-recent-tabs-v1-backup";
 /** Hard cap on retained tabs (oldest beyond this are dropped). */
 export declare const MAX_TABS = 40;
+/** Hard cap on the closed-tab history (the newest are kept). */
+export declare const MAX_CLOSED = 10;
 /** One retained session tab. */
 export interface RecentTab {
     /** Session identity. */
@@ -64,6 +72,21 @@ export interface FavoriteFolder {
 /** One node of the favorites tree: a bookmark row or a folder. */
 export type FavoriteNode = FavoriteEntry | FavoriteFolder;
 /**
+ * One tab the user dismissed from the strip.
+ *
+ * The title is captured at close time on purpose: the row is gone, so the only
+ * remaining name is this one until the session is opened again and the live
+ * list answers with a fresher one.
+ */
+export interface ClosedTab {
+    /** Session identity. */
+    readonly id: string;
+    /** Title the tab was showing when it was closed. */
+    readonly title: string;
+    /** When it was closed (`Date.now()`); the list itself is newest-first. */
+    readonly closedAt: number;
+}
+/**
  * Whether a node is a folder.
  *
  * `children` is the one field a folder has that a bookmark row never does, and
@@ -73,7 +96,7 @@ export type FavoriteNode = FavoriteEntry | FavoriteFolder;
  * @returns true when the node is a folder.
  */
 export declare function isFolder(node: FavoriteNode): node is FavoriteFolder;
-/** Both persisted collections, as one record. */
+/** All persisted collections, as one record. */
 export interface Ledger {
     readonly tabs: readonly RecentTab[];
     /**
@@ -82,10 +105,16 @@ export interface Ledger {
      * tree from here.
      */
     readonly favorites: readonly FavoriteNode[];
+    /**
+     * Hand-closed tabs, newest first. Independent of both other collections:
+     * closing a tab never removed its bookmark, and neither one is consulted to
+     * build this list.
+     */
+    readonly closed: readonly ClosedTab[];
 }
 /** Result of reading the persisted text. */
 export interface ParsedLedger {
-    /** The two lists, normalized. */
+    /** The three lists, normalized. */
     ledger: Ledger;
     /** True when the stored payload used the legacy tab-array shape. */
     migrated: boolean;
@@ -125,6 +154,34 @@ export declare function recordTab(tabs: readonly RecentTab[], id: string, title:
  * @returns the next list, the SAME reference when the id was absent.
  */
 export declare function removeTab(tabs: readonly RecentTab[], id: string): RecentTab[];
+/**
+ * Move one tab that was just closed to the front of the history.
+ *
+ * Re-closing a session that is already in the history rewrites its one row in
+ * place at the front — a history is a set of sessions, not a log, so the same
+ * session never appears twice. Only the close button reaches this function;
+ * a session that leaves the live list on its own is not a hand close.
+ *
+ * Idempotent for the case the caller can hit twice: the row is already the head
+ * with the same title, so nothing — not even the timestamp — has to change. The
+ * returned array is then the very same reference, which keeps the controller
+ * from notifying subscribers for an observation that changed nothing.
+ * @param closed - current history, newest first.
+ * @param id - session that was closed.
+ * @param title - the display name the tab had when it was closed.
+ * @returns the next history, the SAME reference when nothing changed.
+ */
+export declare function recordClosed(closed: readonly ClosedTab[], id: string, title: string): ClosedTab[];
+/**
+ * Drop one session from the closed-tab history.
+ *
+ * Called when a session is opened again: the strip and the history describe the
+ * same set of tabs, so a session cannot be in both at once.
+ * @param closed - current history, newest first.
+ * @param id - session to forget.
+ * @returns the next history, the SAME reference when the id was absent.
+ */
+export declare function dropClosed(closed: readonly ClosedTab[], id: string): ClosedTab[];
 /**
  * Move one tab before/after another.
  * @param tabs - current list.
@@ -285,7 +342,7 @@ export declare function nextActiveAfterClose(order: readonly string[], tabs: rea
  */
 export declare function loadLedger(storage: TabStorage | undefined): Ledger;
 /**
- * Persist both collections, ignoring storage failures (private mode, quota).
+ * Persist all three collections, ignoring storage failures (private mode, quota).
  * @param storage - browser storage (or a fake in tests).
  * @param ledger - the record to persist.
  */

@@ -370,15 +370,19 @@ describe('strip tabs', () => {
     expect(saved.favorites).toEqual([{ id: 's1', title: 'Alpha' }])
   })
 
-  it('seats the favorite trigger at the right end of the bar, outside the scrolling row', () => {
+  it('seats both tail triggers at the right end of the bar, outside the scrolling row', () => {
     setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
 
-    // The bar is the tab row plus the trigger, and the trigger comes last.
-    expect(bar().children).toHaveLength(2)
+    // The bar is the tab row plus two triggers: the history one next to the
+    // row, the favorites one last.
+    expect(bar().children).toHaveLength(3)
     expect(bar().lastElementChild).toBe(button())
-    // It must not scroll away with the tabs, so it is not inside the row.
+    expect(stripRow().nextElementSibling?.getAttribute('data-dsh-part'))
+      .toBe('closed-history-button')
+    expect(button().previousElementSibling?.getAttribute('data-dsh-part'))
+      .toBe('closed-history-button')
+    // Neither scrolls away with the tabs, so neither is inside the row.
     expect(stripRow().contains(button())).toBe(false)
-    expect(stripRow().nextElementSibling).toBe(button())
     // Placement moved; the contract did not.
     expect(button().getAttribute('data-dsh-part')).toBe('favorite-button')
     expect(button().getAttribute('aria-haspopup')).toBe('dialog')
@@ -527,6 +531,7 @@ describe('tab context menu', () => {
         { id: 's2', title: 'Beta' },
       ],
       favorites: [{ id: 's2', title: 'Beta' }],
+      closed: [],
     })
     expect(menu()).toBeNull()
     // Favoriting a tab never switches sessions.
@@ -548,6 +553,7 @@ describe('tab context menu', () => {
         { id: 's2', title: 'Beta' },
       ],
       favorites: [],
+      closed: [],
     })
   })
 })
@@ -627,6 +633,7 @@ describe('favorites drawer', () => {
     expect(JSON.parse(storage.value ?? 'null')).toEqual({
       tabs: [{ id: 's1', title: 'Alpha' }],
       favorites: [{ id: 's1', title: 'Alpha' }],
+      closed: [],
     })
     expect(favoriteItems().map(favoriteLabel)).toEqual(['Alpha'])
     expect(openSession).not.toHaveBeenCalled()
@@ -639,6 +646,7 @@ describe('favorites drawer', () => {
     expect(JSON.parse(storage.value ?? 'null')).toEqual({
       tabs: [{ id: 's1', title: 'Alpha' }],
       favorites: [],
+      closed: [],
     })
     expect(favoriteItems()).toHaveLength(0)
   })
