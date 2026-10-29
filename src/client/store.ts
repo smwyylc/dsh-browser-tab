@@ -7,6 +7,12 @@
  * now", a favorite is "kept for later". Closing a tab therefore never touches
  * the favorites collection, and pinning a session never reorders the strip.
  *
+ * A third collection keeps the short history of hand-closed tabs, the way a
+ * browser remembers "recently closed". It is a record of an EVENT rather than a
+ * membership list: only a close button adds to it, a session that leaves the
+ * live list on its own does not, and opening a session takes it back out so the
+ * same id never sits in the strip and in the history at once.
+ *
  * Favorites are a tree rather than a flat list, the way a bookmark manager has
  * folders: `favorites` is its top layer, and a folder is a node that holds
  * bookmark rows and other folders. Every operation here is a function of that
@@ -32,6 +38,9 @@ export const BACKUP_KEY = 'dsh-recent-tabs-v1-backup'
 
 /** Hard cap on retained tabs (oldest beyond this are dropped). */
 export const MAX_TABS = 40
+
+/** Hard cap on the closed-tab history (the newest are kept). */
+export const MAX_CLOSED = 10
 
 /** One retained session tab. */
 export interface RecentTab {
@@ -72,6 +81,22 @@ export interface FavoriteFolder {
 export type FavoriteNode = FavoriteEntry | FavoriteFolder
 
 /**
+ * One tab the user dismissed from the strip.
+ *
+ * The title is captured at close time on purpose: the row is gone, so the only
+ * remaining name is this one until the session is opened again and the live
+ * list answers with a fresher one.
+ */
+export interface ClosedTab {
+  /** Session identity. */
+  readonly id: string
+  /** Title the tab was showing when it was closed. */
+  readonly title: string
+  /** When it was closed (`Date.now()`); the list itself is newest-first. */
+  readonly closedAt: number
+}
+
+/**
  * Whether a node is a folder.
  *
  * `children` is the one field a folder has that a bookmark row never does, and
@@ -84,7 +109,7 @@ export function isFolder(node: FavoriteNode): node is FavoriteFolder {
   return 'children' in node
 }
 
-/** Both persisted collections, as one record. */
+/** All persisted collections, as one record. */
 export interface Ledger {
   readonly tabs: readonly RecentTab[]
   /**
@@ -93,11 +118,17 @@ export interface Ledger {
    * tree from here.
    */
   readonly favorites: readonly FavoriteNode[]
+  /**
+   * Hand-closed tabs, newest first. Independent of both other collections:
+   * closing a tab never removed its bookmark, and neither one is consulted to
+   * build this list.
+   */
+  readonly closed: readonly ClosedTab[]
 }
 
 /** Result of reading the persisted text. */
 export interface ParsedLedger {
-  /** The two lists, normalized. */
+  /** The three lists, normalized. */
   ledger: Ledger
   /** True when the stored payload used the legacy tab-array shape. */
   migrated: boolean
@@ -116,7 +147,7 @@ export function shortId(id: string): string {
 
 /** A fresh empty ledger (never a shared constant: callers own their arrays). */
 function emptyLedger(): Ledger {
-  return { tabs: [], favorites: [] }
+  return { tabs: [], favorites: [], closed: [] }
 }
 
 /**
@@ -182,15 +213,60 @@ function readFavorites(rows: readonly unknown[]): FavoriteNode[] {
 }
 
 /**
- * Normalize the current shape's two arrays independently.
+ * Validate one stored closed row.
+ *
+ * A missing title falls back to the short id and a missing or non-numeric
+ * timestamp to 0, exactly like the other buckets: an unreadable field must not
+ * take the whole row down.
+ * @param row - one raw row.
+ * @param seen - ids already accepted, mutated in place.
+ * @returns the normalized row, or undefined when it must be dropped.
+ */
+function readClosedRow(row: unknown, seen: Set<string>): ClosedTab | undefined {
+  if (typeof row !== 'object' || row === null) return undefined
+  const id = (row as { id?: unknown }).id
+  if (typeof id !== 'string' || id === '' || seen.has(id)) return undefined
+  seen.add(id)
+  const title = (row as { title?: unknown }).title
+  const closedAt = (row as { closedAt?: unknown }).closedAt
+  return {
+    id,
+    title: typeof title === 'string' && title !== '' ? title : shortId(id),
+    closedAt: typeof closedAt === 'number' && Number.isFinite(closedAt) ? closedAt : 0,
+  }
+}
+
+/**
+ * Normalize the closed-tab history, keeping the stored order and the cap.
+ * @param rows - raw history rows, newest first as stored.
+ * @returns the validated history.
+ */
+function readClosed(rows: readonly unknown[]): ClosedTab[] {
+  const seen = new Set<string>()
+  const kept: ClosedTab[] = []
+  for (const row of rows) {
+    if (kept.length >= MAX_CLOSED) break
+    const entry = readClosedRow(row, seen)
+    if (entry !== undefined) kept.push(entry)
+  }
+  return kept
+}
+
+/**
+ * Normalize the current shape's three arrays independently.
  *
  * They are deduped one by one, not against each other: the same session is
  * usually both an open tab and a bookmark, and that is not a duplicate.
  * @param tabs - raw tab rows.
  * @param favorites - raw favorite nodes (the root layer of the tree).
+ * @param closed - raw closed-history rows, newest first.
  * @returns the normalized ledger.
  */
-function readCurrent(tabs: readonly unknown[], favorites: readonly unknown[]): Ledger {
+function readCurrent(
+  tabs: readonly unknown[],
+  favorites: readonly unknown[],
+  closed: readonly unknown[],
+): Ledger {
   const tabSeen = new Set<string>()
   const keptTabs: RecentTab[] = []
   for (const row of tabs) {
@@ -198,18 +274,19 @@ function readCurrent(tabs: readonly unknown[], favorites: readonly unknown[]): L
     const entry = readRow(row, tabSeen)
     if (entry !== undefined) keptTabs.push(entry)
   }
-  return { tabs: keptTabs, favorites: readFavorites(favorites) }
+  return { tabs: keptTabs, favorites: readFavorites(favorites), closed: readClosed(closed) }
 }
 
 /**
- * Split the legacy tab array into the two collections.
+ * Split the legacy tab array into the collections.
  *
  * One row in that shape was both things at once when it carried the flag, so a
  * flagged row becomes a bookmark AND stays a tab: bookmarking a tab never
  * closed it, and dropping the tab here is what made favorites disappear from
  * the strip on upgrade. The buckets are deduped and ordered one by one, exactly
  * like the current shape, so one id may appear in each; only the tab bucket is
- * capped.
+ * capped. The legacy payload has no history, so that bucket starts empty — and
+ * since nothing is written back for it, an old record is not rewritten.
  * @param rows - the legacy array.
  * @returns the migrated ledger.
  */
@@ -232,7 +309,7 @@ function readLegacy(rows: readonly unknown[]): Ledger {
     const tab = readRow(row, tabSeen)
     if (tab !== undefined) tabs.push(tab)
   }
-  return { tabs, favorites }
+  return { tabs, favorites, closed: [] }
 }
 
 /**
@@ -254,8 +331,13 @@ export function parseLedger(raw: string | null): ParsedLedger {
   if (typeof parsed === 'object' && parsed !== null) {
     const tabs = (parsed as { tabs?: unknown }).tabs
     const favorites = (parsed as { favorites?: unknown }).favorites
+    const closed = (parsed as { closed?: unknown }).closed
     return {
-      ledger: readCurrent(Array.isArray(tabs) ? tabs : [], Array.isArray(favorites) ? favorites : []),
+      ledger: readCurrent(
+        Array.isArray(tabs) ? tabs : [],
+        Array.isArray(favorites) ? favorites : [],
+        Array.isArray(closed) ? closed : [],
+      ),
       migrated: false,
     }
   }
@@ -297,6 +379,47 @@ export function recordTab(tabs: readonly RecentTab[], id: string, title: string)
 export function removeTab(tabs: readonly RecentTab[], id: string): RecentTab[] {
   const next = tabs.filter(tab => tab.id !== id)
   return next.length === tabs.length ? tabs as RecentTab[] : next
+}
+
+/**
+ * Move one tab that was just closed to the front of the history.
+ *
+ * Re-closing a session that is already in the history rewrites its one row in
+ * place at the front — a history is a set of sessions, not a log, so the same
+ * session never appears twice. Only the close button reaches this function;
+ * a session that leaves the live list on its own is not a hand close.
+ *
+ * Idempotent for the case the caller can hit twice: the row is already the head
+ * with the same title, so nothing — not even the timestamp — has to change. The
+ * returned array is then the very same reference, which keeps the controller
+ * from notifying subscribers for an observation that changed nothing.
+ * @param closed - current history, newest first.
+ * @param id - session that was closed.
+ * @param title - the display name the tab had when it was closed.
+ * @returns the next history, the SAME reference when nothing changed.
+ */
+export function recordClosed(closed: readonly ClosedTab[], id: string, title: string): ClosedTab[] {
+  if (id === '') return closed as ClosedTab[]
+  const nextTitle = title === '' ? shortId(id) : title
+  const head = closed[0]
+  if (head !== undefined && head.id === id && head.title === nextTitle) return closed as ClosedTab[]
+  const rest = closed.filter(row => row.id !== id)
+  const next = [{ id, title: nextTitle, closedAt: Date.now() }, ...rest]
+  return next.length > MAX_CLOSED ? next.slice(0, MAX_CLOSED) : next
+}
+
+/**
+ * Drop one session from the closed-tab history.
+ *
+ * Called when a session is opened again: the strip and the history describe the
+ * same set of tabs, so a session cannot be in both at once.
+ * @param closed - current history, newest first.
+ * @param id - session to forget.
+ * @returns the next history, the SAME reference when the id was absent.
+ */
+export function dropClosed(closed: readonly ClosedTab[], id: string): ClosedTab[] {
+  const next = closed.filter(row => row.id !== id)
+  return next.length === closed.length ? closed as ClosedTab[] : next
 }
 
 /**
@@ -891,14 +1014,18 @@ export function loadLedger(storage: TabStorage | undefined): Ledger {
 }
 
 /**
- * Persist both collections, ignoring storage failures (private mode, quota).
+ * Persist all three collections, ignoring storage failures (private mode, quota).
  * @param storage - browser storage (or a fake in tests).
  * @param ledger - the record to persist.
  */
 export function saveLedger(storage: TabStorage | undefined, ledger: Ledger): void {
   if (storage === undefined) return
   try {
-    storage.setItem(STORAGE_KEY, JSON.stringify({ tabs: ledger.tabs, favorites: ledger.favorites }))
+    storage.setItem(STORAGE_KEY, JSON.stringify({
+      tabs: ledger.tabs,
+      favorites: ledger.favorites,
+      closed: ledger.closed,
+    }))
   } catch {
     // Persistence is best-effort: the live lists stay authoritative.
   }

@@ -27,6 +27,11 @@ export const zh = {
   'fav.folderRename': '文件夹名称',
   'menu.favorite': '收藏',
   'menu.unfavorite': '取消收藏',
+  'hist.button': '最近关闭',
+  'hist.panelTitle': '最近关闭',
+  'hist.empty': '还没有关过标签，从条上关掉的标签会出现在这里',
+  'hist.dead': '该会话已不存在',
+  'hist.reopen': '重新打开该会话',
   'rename.label': '会话名称',
   'rename.failed': '重命名失败',
 }
@@ -58,6 +63,11 @@ export const en: Record<RecentTabsKey, string> = {
   'fav.folderRename': 'Folder name',
   'menu.favorite': 'Add to favorites',
   'menu.unfavorite': 'Remove from favorites',
+  'hist.button': 'Recently closed',
+  'hist.panelTitle': 'Recently closed',
+  'hist.empty': 'No closed tabs yet — tabs you close from the strip will show up here',
+  'hist.dead': 'This session no longer exists',
+  'hist.reopen': 'Reopen this session',
   'rename.label': 'Session name',
   'rename.failed': 'Rename failed',
 }

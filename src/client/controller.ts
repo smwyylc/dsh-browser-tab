@@ -2,9 +2,10 @@
  * Tab-strip state owner: holds the persisted ledger, exposes a snapshot for
  * useSyncExternalStore, and mutates through the pure store functions.
  *
- * Tabs and favorites are separate collections in the store; this class keeps
- * them separate too. The strip consumes `tabs`, the drawer consumes
- * `favorites`, and closing a tab only ever rewrites the tab list.
+ * Tabs, favorites and the closed-tab history are separate collections in the
+ * store; this class keeps them separate too. The strip consumes `tabs`, the
+ * favorites drawer consumes `favorites`, the history drawer consumes `closed`,
+ * and closing a tab only ever rewrites the tab list plus that history.
  *
  * Kept out of the React component so the rapid-switching path never re-enters
  * a render pass: a mutation that changes nothing returns the same snapshot
@@ -12,6 +13,7 @@
  */
 import {
   createFolder as createFolderInTree,
+  dropClosed,
   dropOrder,
   loadLedger,
   moveFavorite as moveFavoriteEntry,
@@ -20,6 +22,7 @@ import {
   moveFolderInto as moveFolderIntoFolder,
   moveTab,
   nextActiveAfterClose,
+  recordClosed,
   recordTab,
   removeFolder as removeFolderEntry,
   removeTab,
@@ -27,6 +30,7 @@ import {
   saveLedger,
   toggleFavorite as toggleFavoriteEntry,
   touchOrder,
+  type ClosedTab,
   type FavoriteNode,
   type RecentTab,
   type TabStorage,
@@ -41,23 +45,28 @@ export interface TabsSnapshot {
    * a bookmark, at the root or inside a folder.
    */
   readonly favorites: readonly FavoriteNode[]
+  /**
+   * Hand-closed tabs, newest first. A session is never in `tabs` and `closed`
+   * at the same time: closing adds it here, opening it takes it away again.
+   */
+  readonly closed: readonly ClosedTab[]
   /** Activation order, most-recent-first (in-memory; not persisted). */
   readonly order: readonly string[]
 }
 
-const EMPTY: TabsSnapshot = { tabs: [], favorites: [], order: [] }
+const EMPTY: TabsSnapshot = { tabs: [], favorites: [], closed: [], order: [] }
 
 export class RecentTabsController {
   private snapshot: TabsSnapshot = EMPTY
   private readonly listeners = new Set<() => void>()
 
   constructor(private readonly storage: TabStorage | undefined) {
-    const { tabs, favorites } = loadLedger(storage)
+    const { tabs, favorites, closed } = loadLedger(storage)
     // Restored tabs have no known activation history: seed the order with the
     // stored sequence so a close still has a deterministic fallback.
-    this.snapshot = tabs.length === 0 && favorites.length === 0
+    this.snapshot = tabs.length === 0 && favorites.length === 0 && closed.length === 0
       ? EMPTY
-      : { tabs, favorites, order: tabs.map(tab => tab.id) }
+      : { tabs, favorites, closed, order: tabs.map(tab => tab.id) }
   }
 
   /** Current snapshot (stable reference until a real change). */
@@ -71,31 +80,48 @@ export class RecentTabsController {
 
   /**
    * Record one session as opened and mark it active.
+   *
+   * Opening a session also takes it out of the closed-tab history: the strip
+   * and that history must never list the same session at once. The tab list and
+   * the activation order usually do not change on a re-observation, but the
+   * history can, so it is part of the change test and of the persisted record.
    * @param id - session identity.
    * @param title - resolved display title.
    */
   record(id: string, title: string): void {
     const tabs = recordTab(this.snapshot.tabs, id, title)
     const order = touchOrder(this.snapshot.order, id)
-    if (tabs === this.snapshot.tabs && order === this.snapshot.order) return
-    if (tabs !== this.snapshot.tabs) this.persist(tabs, this.snapshot.favorites)
-    this.publish(tabs, this.snapshot.favorites, order)
+    const closed = dropClosed(this.snapshot.closed, id)
+    if (
+      tabs === this.snapshot.tabs
+      && order === this.snapshot.order
+      && closed === this.snapshot.closed
+    ) return
+    if (tabs !== this.snapshot.tabs || closed !== this.snapshot.closed) {
+      this.persist(tabs, this.snapshot.favorites, closed)
+    }
+    this.publish(tabs, this.snapshot.favorites, order, closed)
   }
 
   /**
    * Remove one tab and return the id the caller should activate next.
    *
    * The MRU order decides: the tab the user was last on among the survivors.
-   * Bookmarks are untouched — closing a tab is not closing a favorite.
+   * Bookmarks are untouched — closing a tab is not closing a favorite. This is
+   * also the ONE place the closed-tab history grows: only a hand close reaches
+   * here, so a session that merely leaves the live list is never recorded. The
+   * row's own display name is captured before the row is dropped.
    * @param id - session identity to close.
    * @returns the id to open, or undefined when no tab remains.
    */
   remove(id: string): string | undefined {
+    const closing = this.snapshot.tabs.find(tab => tab.id === id)
     const tabs = removeTab(this.snapshot.tabs, id)
     if (tabs === this.snapshot.tabs) return undefined
     const order = dropOrder(this.snapshot.order, id)
-    this.persist(tabs, this.snapshot.favorites)
-    this.publish(tabs, this.snapshot.favorites, order)
+    const closed = recordClosed(this.snapshot.closed, id, closing === undefined ? '' : closing.title)
+    this.persist(tabs, this.snapshot.favorites, closed)
+    this.publish(tabs, this.snapshot.favorites, order, closed)
     return nextActiveAfterClose(order, tabs, id)
   }
 
@@ -112,8 +138,8 @@ export class RecentTabsController {
   move(id: string, targetId: string, place: 'before' | 'after'): void {
     const tabs = moveTab(this.snapshot.tabs, id, targetId, place)
     if (tabs === this.snapshot.tabs) return
-    this.persist(tabs, this.snapshot.favorites)
-    this.publish(tabs, this.snapshot.favorites, this.snapshot.order)
+    this.persist(tabs, this.snapshot.favorites, this.snapshot.closed)
+    this.publish(tabs, this.snapshot.favorites, this.snapshot.order, this.snapshot.closed)
   }
 
   /**
@@ -158,8 +184,8 @@ export class RecentTabsController {
     const label = title === undefined || title.trim() === '' ? t('fav.folderDefault') : title
     const created = createFolderInTree(this.snapshot.favorites, parentId, label)
     if (created.folder === undefined) return ''
-    this.persist(this.snapshot.tabs, created.next)
-    this.publish(this.snapshot.tabs, created.next, this.snapshot.order)
+    this.persist(this.snapshot.tabs, created.next, this.snapshot.closed)
+    this.publish(this.snapshot.tabs, created.next, this.snapshot.order, this.snapshot.closed)
     return created.folder.id
   }
 
@@ -235,20 +261,25 @@ export class RecentTabsController {
    */
   private commitFavorites(favorites: readonly FavoriteNode[]): void {
     if (favorites === this.snapshot.favorites) return
-    this.persist(this.snapshot.tabs, favorites)
-    this.publish(this.snapshot.tabs, favorites, this.snapshot.order)
+    this.persist(this.snapshot.tabs, favorites, this.snapshot.closed)
+    this.publish(this.snapshot.tabs, favorites, this.snapshot.order, this.snapshot.closed)
   }
 
-  private persist(tabs: readonly RecentTab[], favorites: readonly FavoriteNode[]): void {
-    saveLedger(this.storage, { tabs, favorites })
+  private persist(
+    tabs: readonly RecentTab[],
+    favorites: readonly FavoriteNode[],
+    closed: readonly ClosedTab[],
+  ): void {
+    saveLedger(this.storage, { tabs, favorites, closed })
   }
 
   private publish(
     tabs: readonly RecentTab[],
     favorites: readonly FavoriteNode[],
     order: readonly string[],
+    closed: readonly ClosedTab[],
   ): void {
-    this.snapshot = { tabs, favorites, order }
+    this.snapshot = { tabs, favorites, closed, order }
     for (const listener of this.listeners) listener()
   }
 }

@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   BACKUP_KEY,
+  MAX_CLOSED,
   MAX_TABS,
   STORAGE_KEY,
   createFolder,
+  dropClosed,
   dropOrder,
   findFavorite,
   isFolder,
@@ -15,6 +17,7 @@ import {
   moveTab,
   nextActiveAfterClose,
   parseLedger,
+  recordClosed,
   recordTab,
   removeFolder,
   removeTab,
@@ -23,6 +26,7 @@ import {
   shortId,
   toggleFavorite,
   touchOrder,
+  type ClosedTab,
   type FavoriteEntry,
   type FavoriteFolder,
   type FavoriteNode,
@@ -68,7 +72,7 @@ describe('shortId', () => {
 })
 
 describe('parseLedger', () => {
-  const empty = { tabs: [], favorites: [] }
+  const empty = { tabs: [], favorites: [], closed: [] }
 
   it('returns an empty ledger for absent, blank, corrupt, or scalar payloads', () => {
     expect(parseLedger(null)).toEqual({ ledger: empty, migrated: false })
@@ -78,15 +82,17 @@ describe('parseLedger', () => {
     expect(parseLedger('null')).toEqual({ ledger: empty, migrated: false })
   })
 
-  it('reads both collections of the current shape', () => {
+  it('reads all three collections of the current shape', () => {
     const parsed = parseLedger(JSON.stringify({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [{ id: 'c', title: 'Gamma', closedAt: 7 }],
     }))
     expect(parsed.migrated).toBe(false)
     expect(parsed.ledger).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [{ id: 'c', title: 'Gamma', closedAt: 7 }],
     })
   })
 
@@ -198,7 +204,7 @@ describe('parseLedger', () => {
       'no row',
     ]))
     expect(parsed.migrated).toBe(true)
-    expect(parsed.ledger).toEqual({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [] })
+    expect(parsed.ledger).toEqual({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [], closed: [] })
   })
 
   it('dedupes the two legacy buckets one by one, keeping the first row of each', () => {
@@ -269,18 +275,125 @@ describe('removeTab', () => {
   })
 })
 
+describe('recordClosed / dropClosed', () => {
+  it('prepends the newest close with the title the tab was showing', () => {
+    const one = recordClosed([], 'a', 'Alpha')
+    expect(one).toHaveLength(1)
+    expect(one[0]).toMatchObject({ id: 'a', title: 'Alpha' })
+    expect(typeof one[0].closedAt).toBe('number')
+
+    const two = recordClosed(one, 'b', 'Beta')
+    expect(two.map(row => row.id)).toEqual(['b', 'a'])
+    expect(two[0].title).toBe('Beta')
+    // Pure: the input history is never mutated.
+    expect(one.map(row => row.id)).toEqual(['a'])
+  })
+
+  it('moves a session closed again back to the top instead of listing it twice', () => {
+    const closed = recordClosed(recordClosed([], 'a', 'Alpha'), 'b', 'Beta')
+    const again = recordClosed(closed, 'a', 'Alpha')
+    expect(again.map(row => row.id)).toEqual(['a', 'b'])
+    expect(again).toHaveLength(2)
+  })
+
+  it('is idempotent when that session is already the head with the same title', () => {
+    const closed = recordClosed([], 'a', 'Alpha')
+    expect(recordClosed(closed, 'a', 'Alpha')).toBe(closed)
+    // A different title is a real change, and a missing id is a no-op.
+    expect(recordClosed(closed, 'a', 'Renamed')).not.toBe(closed)
+    expect(recordClosed(closed, '', 'Alpha')).toBe(closed)
+  })
+
+  it('keeps only the newest MAX_CLOSED rows', () => {
+    let closed: ClosedTab[] = []
+    for (let i = 0; i < MAX_CLOSED + 3; i += 1) closed = recordClosed(closed, `s${i}`, `T${i}`)
+    expect(closed).toHaveLength(MAX_CLOSED)
+    expect(closed[0].id).toBe(`s${MAX_CLOSED + 2}`)
+    expect(closed.some(row => row.id === 's0')).toBe(false)
+  })
+
+  it('falls back to the short id for a blank title', () => {
+    expect(recordClosed([], 'session-abcdef', '')[0].title).toBe('session-')
+  })
+
+  it('drops one session, returning the SAME reference when it is absent', () => {
+    const closed = recordClosed([], 'a', 'Alpha')
+    expect(dropClosed(closed, 'a')).toEqual([])
+    expect(dropClosed(closed, 'zzz')).toBe(closed)
+  })
+})
+
+describe('closed history persistence', () => {
+  it('reads the history back in stored order', () => {
+    const parsed = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [],
+      closed: [
+        { id: 'b', title: 'Beta', closedAt: 20 },
+        { id: 'a', title: 'Alpha', closedAt: 10 },
+      ],
+    }))
+    expect(parsed.migrated).toBe(false)
+    expect(parsed.ledger.closed).toEqual([
+      { id: 'b', title: 'Beta', closedAt: 20 },
+      { id: 'a', title: 'Alpha', closedAt: 10 },
+    ])
+  })
+
+  it('treats a missing, non-array, or malformed history as an empty one', () => {
+    // A record written before this collection existed: no field, no rewrite.
+    const older = parseLedger(JSON.stringify({ tabs: [], favorites: [] }))
+    expect(older.ledger.closed).toEqual([])
+    expect(older.migrated).toBe(false)
+    expect(parseLedger(JSON.stringify({ tabs: [], favorites: [], closed: 'nope' })).ledger.closed)
+      .toEqual([])
+
+    // Bad rows are dropped one by one; a missing title and timestamp fall back
+    // to the short id and 0, exactly like the other buckets.
+    const rows = parseLedger(JSON.stringify({
+      tabs: [],
+      favorites: [],
+      closed: [
+        null,
+        { id: '' },
+        { id: 7 },
+        { id: 'a' },
+        { id: 'a', title: 'Duplicate' },
+        { id: 'b', title: 'Beta', closedAt: 'later' },
+      ],
+    }))
+    expect(rows.ledger.closed).toEqual([
+      { id: 'a', title: 'a', closedAt: 0 },
+      { id: 'b', title: 'Beta', closedAt: 0 },
+    ])
+  })
+
+  it('caps the history at MAX_CLOSED, keeping the newest rows', () => {
+    const closed = Array.from(
+      { length: MAX_CLOSED + 5 },
+      (_, i) => ({ id: `s${i}`, title: `T${i}`, closedAt: i }),
+    )
+    const parsed = parseLedger(JSON.stringify({ tabs: [], favorites: [], closed }))
+    expect(parsed.ledger.closed).toHaveLength(MAX_CLOSED)
+    expect(parsed.ledger.closed[0].id).toBe('s0')
+    expect(parsed.ledger.closed[MAX_CLOSED - 1].id).toBe(`s${MAX_CLOSED - 1}`)
+  })
+})
+
 describe('loadLedger / saveLedger', () => {
-  it('round-trips both collections through storage in the record shape', () => {
+  it('round-trips all three collections through storage in the record shape', () => {
     const storage = memoryStorage()
     const ledger = {
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [{ id: 'c', title: 'Gamma', closedAt: 7 }],
     }
     saveLedger(storage, ledger)
     expect(storage.writes).toBe(1)
     expect(JSON.parse(storage.value ?? 'null')).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [{ id: 'c', title: 'Gamma', closedAt: 7 }],
     })
     // Reading a current-shape payload is a no-op: no rewrite, no backup.
     expect(loadLedger(storage)).toEqual(ledger)
@@ -299,6 +412,7 @@ describe('loadLedger / saveLedger', () => {
     expect(ledger).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }, { id: 'b', title: 'Beta' }],
       favorites: [{ id: 'b', title: 'Beta' }],
+      closed: [],
     })
     expect(JSON.parse(storage.value ?? 'null')).toEqual(ledger)
     // The backup is the old text byte for byte, not a re-serialized copy.
@@ -321,6 +435,7 @@ describe('loadLedger / saveLedger', () => {
     expect(JSON.parse(storage.value ?? 'null')).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'a', title: 'Alpha' }],
+      closed: [],
     })
   })
 
@@ -328,7 +443,11 @@ describe('loadLedger / saveLedger', () => {
     const raw = JSON.stringify({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [] })
     const storage = memoryStorage(raw)
 
-    expect(loadLedger(storage)).toEqual({ tabs: [{ id: 'a', title: 'Alpha' }], favorites: [] })
+    expect(loadLedger(storage)).toEqual({
+      tabs: [{ id: 'a', title: 'Alpha' }],
+      favorites: [],
+      closed: [],
+    })
     expect(storage.writes).toBe(0)
     expect(storage.getItem(BACKUP_KEY)).toBeNull()
   })
@@ -347,24 +466,31 @@ describe('loadLedger / saveLedger', () => {
     expect(loadLedger(storage)).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'a', title: 'Alpha' }],
+      closed: [],
     })
     expect(JSON.parse(box.get(STORAGE_KEY) ?? 'null')).toEqual({
       tabs: [{ id: 'a', title: 'Alpha' }],
       favorites: [{ id: 'a', title: 'Alpha' }],
+      closed: [],
     })
   })
 
   it('reads nothing from absent storage or a failing storage', () => {
-    expect(loadLedger(undefined)).toEqual({ tabs: [], favorites: [] })
+    expect(loadLedger(undefined)).toEqual({ tabs: [], favorites: [], closed: [] })
     expect(loadLedger({ getItem() { throw new Error('blocked') }, setItem() {} })).toEqual({
       tabs: [],
       favorites: [],
+      closed: [],
     })
   })
 
   it('swallows a write failure (private mode, quota)', () => {
     const failing: TabStorage = { getItem: () => null, setItem() { throw new Error('quota') } }
-    expect(() => saveLedger(failing, { tabs: [{ id: 'a', title: 'A' }], favorites: [] })).not.toThrow()
+    expect(() => saveLedger(failing, {
+      tabs: [{ id: 'a', title: 'A' }],
+      favorites: [],
+      closed: [],
+    })).not.toThrow()
   })
 })
 
@@ -812,7 +938,7 @@ describe('favorites tree persistence', () => {
 
   it('round-trips a deep tree through storage unchanged', () => {
     const storage = memoryStorage()
-    const ledger = { tabs: [{ id: 'a', title: 'A' }], favorites: sample() }
+    const ledger = { tabs: [{ id: 'a', title: 'A' }], favorites: sample(), closed: [] }
     saveLedger(storage, ledger)
     expect(JSON.parse(storage.value ?? 'null')).toEqual(ledger)
     // A folder payload is current shape: no rewrite, no backup, no migration.

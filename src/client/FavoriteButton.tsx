@@ -17,6 +17,7 @@ import {
   subscribeFavoritesOpen,
   toggleFavoritesOpen,
 } from './fav-drawer-state.ts'
+import { setClosedHistoryOpen } from './hist-drawer-state.ts'
 import { t } from './locales.ts'
 import css from './recent-tabs.module.css'
 
@@ -38,7 +39,12 @@ export function FavoriteButton(): React.JSX.Element {
       aria-expanded={open}
       aria-label={label}
       title={label}
-      onClick={() => { toggleFavoritesOpen() }}
+      onClick={() => {
+        // One popover at a time: the recently-closed drawer gives way to this
+        // one. (The other direction lives in `hist-drawer-state.ts`.)
+        setClosedHistoryOpen(false)
+        toggleFavoritesOpen()
+      }}
     >
       <span className={css.starGlyph} aria-hidden="true" />
       <span className={css.barButtonLabel}>{label}</span>

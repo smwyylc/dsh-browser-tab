@@ -7,7 +7,9 @@ session you open adds a tab, clicking a tab switches to that session, and a tab
 disappears only when you close it. Favorites are a drawer dropping from the right
 end of that strip, the way a browser keeps its bookmarks — and like a browser,
 open tabs and bookmarks are two separate lists: closing a tab never removes its
-bookmark.
+bookmark. The tabs you close by hand are remembered too: a short `Recently
+closed` list sits next to the favorites button, so a tab closed by mistake is
+one click away from being reopened.
 
 ## Behaviour
 
@@ -38,7 +40,18 @@ bookmark.
   the check. None of the three animates, and with none of the three facts the tab
   is plain. All three live on the tab strip only, never in the conversation.
 - **Close by hand.** A tab is removed only through its close button, so the
-  strip is exactly the set of sessions you have not dismissed.
+  strip is exactly the set of sessions you have not dismissed. That button is
+  also the only thing that writes the recently-closed list: a session that ends
+  on its own, or a tab dropped by the retention cap, is not a close.
+- **Recently closed.** The strip's right end carries a second trigger, one step
+  to the left of `Favorites`: `Recently closed` opens a compact drawer listing
+  the last 10 tabs you closed from the strip, newest first, each under the title
+  it had when it went. Click a row to open that session again — and because an
+  open session is not a closed one, the row leaves the list the moment it is
+  recorded back into the strip. A row whose session no longer exists stays
+  listed, dimmed and struck through, and cannot be clicked. With nothing closed
+  yet the drawer says so. The two drawers hang off the same end of the bar, so
+  only one can be open at a time: opening either closes the other.
 - **Bookmarks are their own list.** A favorite is its own stored entry, not a
   flag on a tab. Closing a tab in the strip removes the tab and nothing else:
   the session stays in the favorites drawer, ready to open again.
@@ -71,7 +84,9 @@ bookmark.
   into both themes. It is the only hue this plugin adds — the shell's brand
   color resolves to plain black in this theme, so an accent taken from it would
   mark nothing at all. Only those accents are colored — the panel surface, the
-  tabs and the bar stay neutral. It
+  tabs and the bar stay neutral. The `Recently closed` trigger beside the star is
+  deliberately plain, same control shape in neutral ink, so the two tail buttons
+  never read as one group. It
   also stacks above the strip and above the tab context menu, so neither can cut
   through it while it is open. Everything is drawn from the shell's alias
   tokens, so both themes apply as they are.
@@ -113,59 +128,66 @@ bookmark.
   (sessions no longer listed) cannot be renamed.
 - **Fixed width.** Every tab is 150px wide, so titles of different length never
   reflow the row; long titles ellipsize.
-- **Survives restart.** Both collections are stored in the browser's
+- **Survives restart.** All three collections are stored in the browser's
   `localStorage` under `dsh-recent-tabs-v1`, as one record of `{ tabs,
-  favorites }` — where `favorites` is the top level of a bookmark tree, holding
-  bookmark rows and folders side by side — so they are still there after a page
-  reload or a GUI restart. Closing the browser does not clear them. The order,
-  the bookmarks and the folder structure are part of that record; whether a
-  folder is open and whether the drawer is open are not. A record written by an
-  older version (a bare tab array, with a `favorite` flag on each row) is
-  migrated on the first load: every row stays a tab, and the flagged rows also
-  join `favorites` — one row was both, and pinning a tab never closed it — with
-  each list keeping its original order; the original text is copied to
+  favorites, closed }` — where `favorites` is the top level of a bookmark tree,
+  holding bookmark rows and folders side by side, and `closed` is the
+  recently-closed history of at most 10 rows — so they are still there after a
+  page reload or a GUI restart. Closing the browser does not clear them. The
+  order, the bookmarks, the folder structure and the closed history are part of
+  that record; whether a folder is open and whether a drawer is open are not. A
+  record written by an older version (a bare tab array, with a `favorite` flag on
+  each row) is migrated on the first load: every row stays a tab, and the flagged
+  rows also join `favorites` — one row was both, and pinning a tab never closed
+  it — with each list keeping its original order; the original text is copied to
   `dsh-recent-tabs-v1-backup` before the rewrite. A favorites list from before
-  folders existed is simply a tree with no folders in it, so it needs no
+  folders existed is simply a tree with no folders in it, and a record from
+  before the closed history existed simply has no history, so neither needs a
   migration at all.
 - **Stale tabs stay visible.** A retained session that has left the live list
   stays in the strip, dimmed and struck through, until you close it.
 
 ## Placement
 
-Two additive registrations, none of them replacing a shipped entry:
+Three additive registrations, none of them replacing a shipped entry:
 
 | Slot | Surface |
 | --- | --- |
-| `shell.overlay` | The tab strip, above every column and outside their scroll containers. It also renders the `Favorites` button at its own right end. |
+| `shell.overlay` | The tab strip, above every column and outside their scroll containers. It also renders the `Recently closed` and `Favorites` buttons at its own right end. |
 | `shell.overlay` | The favorites drawer, a sibling of the strip in the same list slot. |
+| `shell.overlay` | The recently-closed drawer, a third sibling in that slot. |
 
-The button is part of the strip rather than a registration of its own: it
-belongs to that one row, at its right end and outside the scrolling tab row, and
-keeping it there means the drawer hangs off the strip's corner. Nothing is added
-to the session header, so no shipped header seat is shadowed. Each registration
-is wrapped in its own `try`/`catch` — a failed mount degrades one surface, it
-never takes the shell down.
+The buttons are part of the strip rather than registrations of their own: they
+belong to that one row, at its right end and outside the scrolling tab row, and
+keeping them there means each drawer hangs off the strip's corner. Nothing is
+added to the session header, so no shipped header seat is shadowed. Each
+registration is wrapped in its own `try`/`catch` — a failed mount degrades one
+surface, it never takes the shell down.
 
-The drawer and the button are separate mounts, so the open flag lives in
-`fav-drawer-state.ts`, a module-level observable that is never persisted. The
-strip subscribes to it too: an open drawer pins the strip on screen, since a
-parked strip would put the drawer's anchor above the viewport.
+Each drawer and its button are separate mounts, so the open flags live in
+`fav-drawer-state.ts` and `hist-drawer-state.ts`, module-level observables that
+are never persisted. The strip subscribes to both: an open drawer pins the strip
+on screen, since a parked strip would put that drawer's anchor above the
+viewport.
 
 ## Architecture
 
 | Half | File | Role |
 | --- | --- | --- |
 | Host | `src/index.ts` | No-op. The feature is entirely client-side. |
-| Client | `src/client/index.ts` | Registers the dictionaries and mounts the two surfaces (strip, drawer), each in its own `try`/`catch`. |
-| Client | `src/client/RecentTabs.tsx` | The React strip: one row of tabs, the favorites trigger at its right end, hover and drag state, inline rename, and the per-tab context menu. It also holds the strip on screen while the drawer is open. |
-| Client | `src/client/FavoriteButton.tsx` | The trigger at the strip's right end: star glyph plus label, `aria-haspopup="dialog"` and `aria-expanded` bound to the drawer. |
-| Client | `src/client/FavoritesPanel.tsx` | The drawer: anchors itself to the trigger rectangle, pins the current session, draws the bookmark tree, creates and renames folders, drags rows vertically and files them into folders. |
-| Client | `src/client/fav-drawer-state.ts` | Module-level open/closed flag shared by the trigger, the strip and the drawer; pure UI state, never persisted. |
+| Client | `src/client/index.ts` | Registers the dictionaries and mounts the three surfaces (strip, favorites drawer, closed-history drawer), each in its own `try`/`catch`. |
+| Client | `src/client/RecentTabs.tsx` | The React strip: one row of tabs, the two tail triggers, hover and drag state, inline rename, and the per-tab context menu. It also holds the strip on screen while either drawer is open. |
+| Client | `src/client/FavoriteButton.tsx` | The favorites trigger at the strip's right end: star glyph plus label, `aria-haspopup="dialog"` and `aria-expanded` bound to the drawer. |
+| Client | `src/client/ClosedHistoryButton.tsx` | The recently-closed trigger, one step to its left: neutral arrow glyph plus label, same dialog attributes. |
+| Client | `src/client/FavoritesPanel.tsx` | The favorites drawer: anchors itself to the trigger rectangle, pins the current session, draws the bookmark tree, creates and renames folders, drags rows vertically and files them into folders. |
+| Client | `src/client/ClosedHistoryPanel.tsx` | The recently-closed drawer: same anchoring, lists the hand-closed tabs newest first, reopens one on click and leaves a dead row listed but disabled. |
+| Client | `src/client/fav-drawer-state.ts` | Module-level open/closed flag shared by the favorites trigger, the strip and that drawer; pure UI state, never persisted. |
+| Client | `src/client/hist-drawer-state.ts` | The same flag for the recently-closed drawer; opening it closes the favorites one. |
 | Client | `src/client/fav-folder-state.ts` | Module-level set of expanded folders; pure UI state, never persisted. |
-| Client | `src/client/use-current-session.ts` | The session view (selection, live ids, titles, run facts) shared by the strip and the drawer. |
+| Client | `src/client/use-current-session.ts` | The session view (selection, live ids, titles, run facts) shared by the strip and both drawers. |
 | Client | `src/client/drag-place.ts` | Drop-side geometry: left/right for the strip row, top/bottom for the drawer column. |
-| Client | `src/client/controller.ts` | Snapshot owner over both stored collections; notifies only on real changes. |
-| Client | `src/client/store.ts` | Pure, framework-free ledger logic: parse and migrate, tabs, the bookmark tree (folders included), reorder, load, save. |
+| Client | `src/client/controller.ts` | Snapshot owner over all three stored collections; notifies only on real changes. |
+| Client | `src/client/store.ts` | Pure, framework-free ledger logic: parse and migrate, tabs, the bookmark tree (folders included), the closed history, reorder, load, save. |
 
 Session data comes from the Session Controller's `ctx.sessions.list` snapshot
 source plus `ctx.uiWorkspace.openSession(id)`. The surfaces are global while
@@ -184,6 +206,12 @@ layer, and the folder operations (`createFolder`, `renameFolder`,
 `removeFolder`, `moveFavoriteInto`, `moveFolderInto`) only ever rewrite that
 tree. None of them touches the tab list or the activation order, which is what
 lets closing a tab leave its bookmark in place.
+
+The closed history is the third collection, and it records an event rather than
+a membership: `controller.remove` is its only writer, so a session that merely
+left the live list never lands there. `recordTab` takes an id back out of it, so
+the strip and the history never list the same session at once, and
+`recordClosed` keeps the list to `MAX_CLOSED` rows, newest first.
 
 The context menu is drawn by this plugin, not by a shell menu component: it is
 a `position: fixed` popup at the click point, clamped into the viewport, and it
@@ -229,3 +257,5 @@ pnpm --filter dsh-recent-tabs build
   some configurations, or a quota fault), the strip still works for the current
   page lifetime but does not persist.
 - The list is capped at 40 tabs; older entries are dropped as new ones arrive.
+- The recently-closed history keeps the last 10 closes; older ones fall off, and
+  it lives in this browser's storage like the rest of the record.
