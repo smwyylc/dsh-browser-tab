@@ -98,8 +98,19 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   条与按钮之间只用条自身的 6px `gap`（与 tab 之间的间距同节奏），不再加分隔线。按钮**不能**
   跟着 `.stripRow` 滚，也不能挪回会话标题栏。收藏面仍是按钮 + 抽屉（`shell.overlay`，
   `FavoritesPanel.tsx`）；条内只留 tab 的右键菜单
-  （`data-dsh-part="tab-menu"`，单项 `tab-menu-favorite`），点击 = `controller.toggleFavorite(id, title)`
+  （`data-dsh-part="tab-menu"`，两项：`tab-menu-new-session` 在上、`tab-menu-favorite` 在下），
+  收藏项点击 = `controller.toggleFavorite(id, title)`
   （标题取该 tab 当前显示名，收藏夹里才有一份可读的落盘标题），不改变 tab 的 click/关闭/拖拽语义。
+- **右键菜单第一项是「新会话」**：点击 = 在该标签所属工作区 `uiWorkspace.startSession(workspaceId)`
+  并切过去；它**只导航**，tabs / favorites / closed 三份集合一个都不写、不落盘。
+  **会话→工作区只能从 `ctx.workspaces.list.getSnapshot()` 的 `items[].sessionIds` 反查**——
+  会话列表行（`SessionSummary`）不带 workspaceId，别想从会话行里挖。`workspaceId` 取不到
+  （服务缺失、快照形状异常、没有任何工作区列出该会话）就**不带参数**调用 `startSession()`，
+  即「沿用当前或最近工作区」；`uiWorkspace` 也缺失则静默 return。解析函数是
+  `session-workspace.ts` 的 `workspaceIdForSession(snapshot, sessionId)`：全函数不抛、多个工作区
+  都含该会话时取第一个。**不要**给 `startSession` 包 try/catch——失败提示归 Workspace 自己，
+  也不要把 `workspaces` 加进 `inject`（同其余服务一样用时 `ctx.get`）。菜单高度预算
+  （`MENU_HEIGHT`）随两项一起改，CSS 里 `.menu` 仍是高度自适应、不加固定高度。
 - **滚轮在 `.stripRow` 上是横向滚动，不是页面滚动**：`RecentTabs.tsx` 用原生
   `addEventListener('wheel', ..., { passive: false })` 绑在 `.stripRow` 上（React 的 `onWheel`
   不保证非 passive，别改回去），`deltaY` 非零时 `preventDefault()` 并把 `scrollLeft` 加上
