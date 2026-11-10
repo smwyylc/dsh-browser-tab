@@ -9,7 +9,7 @@
  */
 import { clientBundle } from '../../shared/tsdown.client.ts'
 
-export default clientBundle('dsh-recent-tabs', ['src/index.ts'], {
+export default clientBundle('dsh-browser-tab', ['src/index.ts'], {
   libExternal: [
     '@deepseek-ai/dsh-client-locale',
     '@deepseek-ai/dsh-client-ui-slots',

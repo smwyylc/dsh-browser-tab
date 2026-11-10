@@ -90,13 +90,20 @@ one click away from being reopened.
   also stacks above the strip and above the tab context menu, so neither can cut
   through it while it is open. Everything is drawn from the shell's alias
   tokens, so both themes apply as they are.
+- **New session from a tab.** Right-click a tab and the menu leads with
+  `New session`: it starts a fresh session in the workspace that tab belongs to
+  and switches to it. The mapping comes from the shell's Workspaces list, since
+  a session row itself carries no workspace; when that list cannot answer, the
+  new session simply joins the current or most recent workspace. The menu
+  closes, and nothing else changes — no tab is closed, no bookmark moves, and
+  the new session's own tab appears once the shell reports it as open.
 - **Two ways to pin.** Inside the drawer, the star pins or unpins the session
   you are looking at. Anywhere else, right-click a tab in the strip and pick
-  `Add to favorites` / `Remove from favorites` from the small menu, a row that
-  carries the same favorites accent and sits one weight heavier once the tab is
-  already pinned. Both entry points write the same favorites collection. The
-  strip's own star only opens the drawer, and favoriting never reorders the
-  strip.
+  `Add to favorites` / `Remove from favorites` from the menu's second item, a
+  row that carries the same favorites accent and sits one weight heavier once
+  the tab is already pinned. Both entry points write the same favorites
+  collection. The strip's own star only opens the drawer, and favoriting never
+  reorders the strip.
 - **Inside the drawer.** Favorites list in stored order, and the session you are
   looking at carries a green dot — the very dot the strip puts on its tab — on
   top of a blue bed: click an entry to open that session, click the cross that
@@ -185,6 +192,7 @@ viewport.
 | Client | `src/client/hist-drawer-state.ts` | The same flag for the recently-closed drawer; opening it closes the favorites one. |
 | Client | `src/client/fav-folder-state.ts` | Module-level set of expanded folders; pure UI state, never persisted. |
 | Client | `src/client/use-current-session.ts` | The session view (selection, live ids, titles, run facts) shared by the strip and both drawers. |
+| Client | `src/client/session-workspace.ts` | Resolves which workspace holds a session, read off the Workspaces list; total, so any missing or malformed snapshot is simply "no answer". |
 | Client | `src/client/drag-place.ts` | Drop-side geometry: left/right for the strip row, top/bottom for the drawer column. |
 | Client | `src/client/controller.ts` | Snapshot owner over all three stored collections; notifies only on real changes. |
 | Client | `src/client/store.ts` | Pure, framework-free ledger logic: parse and migrate, tabs, the bookmark tree (folders included), the closed history, reorder, load, save. |
@@ -192,7 +200,11 @@ viewport.
 Session data comes from the Session Controller's `ctx.sessions.list` snapshot
 source plus `ctx.uiWorkspace.openSession(id)`. The surfaces are global while
 Slot props are session-scoped, so they deliberately do not read `useSessions`
-from props.
+from props. A session row carries no workspace, so the only mapping from a tab
+to its workspace is `ctx.workspaces.list.getSnapshot()`, whose rows list their
+own `sessionIds`; `New session` reads that, and falls back to
+`ctx.uiWorkspace.startSession()` with no id — "inherit the current or most
+recent workspace" — whenever it cannot answer.
 
 The stored list is authoritative for *membership*; the live session list is
 authoritative for *titles and presence*. That split is what lets a retained tab

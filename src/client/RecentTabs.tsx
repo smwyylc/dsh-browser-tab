@@ -12,10 +12,14 @@
  *
  * Favorites are not a tab field: the star trigger sits at the far right of this
  * very bar (`FavoriteButton.tsx`), and the bookmark list is the drawer on the
- * right edge (`FavoritesPanel.tsx`). The strip only offers the per-tab context
- * menu that pins or unpins one tab, and that menu writes to the store's
- * favorites collection — never to the tab row, so closing the tab keeps the
- * bookmark.
+ * right edge (`FavoritesPanel.tsx`). The strip's per-tab context menu is where
+ * a tab is pinned or unpinned, and that menu writes to the store's favorites
+ * collection — never to the tab row, so closing the tab keeps the bookmark.
+ *
+ * That menu leads with `New session`: it starts a fresh session in the
+ * workspace the tab's session belongs to and switches to it. It is navigation,
+ * not storage — it writes none of the three collections, and when the
+ * workspace cannot be resolved the call simply inherits the current one.
  *
  * The bar carries TWO tail triggers and is the anchor of both popovers they
  * open: the favorites drawer (`FavoritesPanel.tsx`) and the recently-closed
@@ -48,7 +52,8 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import type { RecentTabsController } from './controller.ts'
 import { findFavorite, shortId } from './store.ts'
-import type { SessionsLike, UiWorkspaceLike } from './sessions-face.ts'
+import type { SessionsLike, UiWorkspaceLike, WorkspacesLike } from './sessions-face.ts'
+import { workspaceIdForSession } from './session-workspace.ts'
 import { useSessionView } from './use-current-session.ts'
 import { placeFor } from './drag-place.ts'
 import { isFavoritesOpen, subscribeFavoritesOpen } from './fav-drawer-state.ts'
@@ -81,7 +86,8 @@ interface TabMenu {
 
 /** Menu width/height budget used to keep the popup inside the viewport. */
 const MENU_WIDTH = 150
-const MENU_HEIGHT = 44
+/** Two items: `New session` above the favorite toggle. */
+const MENU_HEIGHT = 64
 
 /** Pixels in one wheel "line"; the browser-typical row height for `deltaMode` 1. */
 const WHEEL_LINE_PX = 16
@@ -274,6 +280,20 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
     if (live.current === id) return
     openSession(id)
   }, [live.current, openSession])
+
+  // Start a new session in the same workspace as the tab the menu was opened
+  // on. The session list carries no workspace, so the mapping comes from the
+  // Workspaces snapshot; when that service or the mapping is unavailable the
+  // call still goes through without an id, which the shell reads as "inherit
+  // the current or most recent workspace". Nothing here reports failure: the
+  // Workspace owns its own error notice, and a surface that threw would take
+  // the menu down with it.
+  const startSessionInWorkspace = useCallback((id: string): void => {
+    const uiWorkspace = ctx.get('uiWorkspace') as UiWorkspaceLike | undefined
+    if (uiWorkspace === undefined) return
+    const workspaces = ctx.get('workspaces') as WorkspacesLike | undefined
+    uiWorkspace.startSession(workspaceIdForSession(workspaces?.list.getSnapshot(), id))
+  }, [ctx])
 
   // Closing the tab you are looking at hands the view to the tab you were on
   // before it (MRU). Closing any other tab leaves the view alone.
@@ -579,6 +599,18 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
           data-dsh-part="tab-menu"
           style={menuStyle}
         >
+          <button
+            className={css.menuItem}
+            type="button"
+            role="menuitem"
+            data-dsh-part="tab-menu-new-session"
+            onClick={() => {
+              startSessionInWorkspace(menu.id)
+              setMenu(undefined)
+            }}
+          >
+            {t('menu.newSession')}
+          </button>
           <button
             className={css.menuItem}
             type="button"

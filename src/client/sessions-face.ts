@@ -132,6 +132,31 @@ export interface SessionsLike {
 export interface UiWorkspaceLike {
   /** Select a session and show its conversation as one navigation action. */
   openSession(target: string): void
+  /**
+   * Start a new session and switch to it. With a workspace id the new session
+   * belongs to that workspace; without one the shell inherits the current or
+   * most recent workspace. Creation failures surface through the Workspace's
+   * own notice, so this returns nothing to handle.
+   */
+  startSession(workspaceId?: string): void
+}
+
+/** One workspace row as this surface reads it. */
+export interface WorkspaceViewLike {
+  /** Identifier of the workspace itself. */
+  readonly workspaceId?: unknown
+  /** Sessions filed under it — the only session-to-workspace mapping there is. */
+  readonly sessionIds?: unknown
+}
+
+/**
+ * The Workspaces controller's list source.
+ *
+ * The session list deliberately carries no workspace field, so this snapshot is
+ * the only place a tab can learn which workspace its session belongs to.
+ */
+export interface WorkspacesLike {
+  readonly list: { getSnapshot(): unknown; subscribe(listener: () => void): () => void }
 }
 
 /** The ui-session adapter exposing the per-session UI status source. */

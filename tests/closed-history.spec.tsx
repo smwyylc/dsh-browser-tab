@@ -101,7 +101,8 @@ function fakeSessions(rows: Record<string, FakeRow>, listed?: string[]) {
     },
   }
   const openSession = vi.fn()
-  const uiWorkspace: UiWorkspaceLike = { openSession }
+  const startSession = vi.fn()
+  const uiWorkspace: UiWorkspaceLike = { openSession, startSession }
   const ctx = {
     get: (name: string) => {
       if (name === 'sessions') return service
