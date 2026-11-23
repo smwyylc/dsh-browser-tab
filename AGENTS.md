@@ -155,6 +155,18 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   重命名两处）。真实点到外面时焦点会真的移走（变成被点元素或 body），守卫不生效，「点外面提交」
   的语义不变；因此测试里模拟「点到外面」不能只发合成 `focusout`（那不会移焦点，会被守卫正确
   拦下），要先真的把焦点移走——jsdom 里 `input.blur()` 会把 `activeElement` 变成 body。
+- **条子盖在热区上，`mouseenter` 因此不可信，揭示/收回必须查 `elementFromPoint`**：`.bar`
+  z-index 2147483001 高于 `.zone` 2147483000，所以 `show()` 让条子滑下来时会**盖住一个静止的
+  指针**——热区的 `mouseleave` 立刻触发（指针此刻算在条子头上），而条子自己的 `mouseenter`
+  **永远不触发**（`mouseenter` 只在指针真实跨边界时派发，元素移到指针下不算）。后果：条子
+  出现 260ms 后必然从用户手底下收走，跟指针快慢无关。修法是两处：① 热区 `onMouseLeave`
+  先用 `document.elementFromPoint(clientX, clientY)` 看落点是不是条子（`barRef.contains`），
+  是就 `hoverRef = true` + `show()` 取消 hide；② `scheduleHide` 的 260ms 回调在 `setOpen(false)`
+  之前用 `pointerRef` 里最后已知坐标再查一次，在条子上就跳过这次收回。`elementFromPoint` 可能
+  不存在（jsdom 压根没实现，是属性缺失不是返回 null），要先 `typeof === 'function'` 再调，
+  缺了就按「说不上来」退回旧行为。**不要**为了这个抬高 `.zone` 的 z-index（会吞掉条子的点击），
+  也不要改 `.zone` 的 10px 高度或 260ms 这个数。测试里必须 stub 掉 hit test，否则 jsdom 下
+  每条用例都会静默走成「指针不在条子上」。
 - **条子的边框与投影只取轻一档**：`.bar` 保持「从屏幕顶缘挂下来」——`border-top: none`、只有底部
   `9px` 圆角、`padding: 6px 10px`（整条约 41px），不要改成四边带框的卡片。边线
   `1px solid var(--dsw-alias-border-l2, ...)`（l1 在浅色下死灰、深色下几乎消失），投影 blur ≤ 20px、

@@ -148,6 +148,10 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   const drawerOpenRef = useRef(drawerOpen)
   /** Whether the pointer is on the bar right now (closing a drawer by button). */
   const hoverRef = useRef(false)
+  /** The bar element itself: "is the pointer on the bar" is a DOM question. */
+  const barRef = useRef<HTMLDivElement | null>(null)
+  /** Last pointer position seen on the zone or the bar, for the hide re-check. */
+  const pointerRef = useRef<{ x: number; y: number } | undefined>(undefined)
   /** Tracks the open -> closed edge, so the 260ms timer only restarts once. */
   const drawerWasOpen = useRef(drawerOpen)
 
@@ -167,6 +171,30 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
     setOpen(true)
   }, [clearHide])
 
+  /**
+   * Whether the pointer is over the bar at the given point.
+   *
+   * `mouseenter` cannot answer this. The bar sits ABOVE the zone
+   * (`recent-tabs.module.css`: `.bar` z-index 2147483001, `.zone`
+   * 2147483000), so revealing it slides the bar down UNDER a stationary
+   * pointer. That fires the zone's `mouseleave` — the bar now covers the
+   * pointer — while the bar's own `mouseenter` never fires, because the
+   * pointer did not move. Without this check the bar retracted from under
+   * the user's cursor 260ms after it appeared, every time. Asking the DOM
+   * who is at that point is the only answer that tracks an element moving
+   * beneath a still pointer; a rectangle test cannot, because the bar is
+   * mid-transition.
+   */
+  const pointerOverBar = useCallback((x: number, y: number): boolean => {
+    const bar = barRef.current
+    if (bar === null) return false
+    // Not every host implements the hit test (jsdom has none at all); treat a
+    // missing one as "cannot say", which falls back to the old behaviour.
+    if (typeof document.elementFromPoint !== 'function') return false
+    const hit = document.elementFromPoint(x, y)
+    return hit !== null && bar.contains(hit)
+  }, [])
+
   // --- Tab context menu ----------------------------------------------------
   /** Menu open right now, or undefined. */
   const [menu, setMenu] = useState<TabMenu | undefined>(undefined)
@@ -185,9 +213,14 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
       if (menuOpenRef.current) return
       // A drawer hangs off this bar: retracting would take its anchor with it.
       if (drawerOpenRef.current) return
+      // The bar may have moved under a still pointer, in which case no
+      // mouseenter ever fired and the pointer is sitting on the bar right
+      // now. Ask the DOM rather than trusting the event stream.
+      const point = pointerRef.current
+      if (point !== undefined && pointerOverBar(point.x, point.y)) return
       setOpen(false)
     }, 260)
-  }, [clearHide])
+  }, [clearHide, pointerOverBar])
 
   // The bar carries both drawers' anchors, and a parked bar puts those anchors
   // above the viewport. So opening either drawer pulls the bar down and keeps
@@ -555,16 +588,33 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
           pointer can open the bar from a spot the bar does not cover. Nothing
           would then fire the bar's own mouseleave and it would stay parked
           open; leaving the band schedules the ordinary retract instead. Moving
-          on into the bar fires this first and its `show` clears the timer. */}
+          on into the bar fires this first and its `show` clears the timer.
+
+          The bar covers the band (higher z-index), so revealing it fires this
+          leave while the pointer is really on the bar — and the bar's own
+          mouseenter never fires, because the pointer did not move. Ask the DOM
+          where the pointer landed before deciding this is a departure. */}
       <div
         className={css.zone}
-        onMouseEnter={show}
-        onMouseLeave={() => {
+        onMouseEnter={(event) => {
+          pointerRef.current = { x: event.clientX, y: event.clientY }
+          show()
+        }}
+        onMouseMove={(event) => {
+          pointerRef.current = { x: event.clientX, y: event.clientY }
+        }}
+        onMouseLeave={(event) => {
+          if (pointerOverBar(event.clientX, event.clientY)) {
+            hoverRef.current = true
+            show()
+            return
+          }
           if (!hoverRef.current) scheduleHide()
         }}
       />
       <div
         className={css.bar}
+        ref={barRef}
         data-open={open || drawerOpen ? '1' : '0'}
         data-dsh-plugin="recent-tabs"
         data-dsh-part="bar"
@@ -572,6 +622,9 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
         onMouseEnter={() => {
           hoverRef.current = true
           show()
+        }}
+        onMouseMove={(event) => {
+          pointerRef.current = { x: event.clientX, y: event.clientY }
         }}
         onMouseLeave={() => {
           hoverRef.current = false

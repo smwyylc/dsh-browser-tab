@@ -41,15 +41,26 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 }
 
 /**
- * Required services: slots for the two overlay seats, locale for the copy.
+ * Required services.
  *
- * Every surface also *reads* `sessions` (list + retention), `uiSession`
- * (per-session status) and `uiWorkspace` (session switching), but resolves them
- * with `ctx.get` at the point of use instead of gating activation on them: a
- * missing one degrades a surface, while a failed apply takes the whole shell
- * down.
+ * `slots` and `locale` mount the surfaces and supply the copy. The session
+ * services are still read at the point of use, but they have to be declared:
+ * since dsh 0.2.3 the client context proxy refuses an undeclared read
+ * (`cannot get property "uiSession.sessionStatus" without inject`) and that
+ * throw takes the whole slot entry down, so the strip silently disappears
+ * while every earlier version kept working. `uiSession.sessionStatus` is a
+ * property-level provider and is declared on its own, the way the shell's own
+ * plugins declare it.
  */
-export const inject = ['slots', 'locale']
+export const inject = [
+  'slots',
+  'locale',
+  'sessions',
+  'uiSession',
+  'uiSession.sessionStatus',
+  'uiWorkspace',
+  'workspaces',
+]
 
 /** Type-only surface (export discipline: no value exports beyond the plugin contract). */
 export type { RecentTabsKey } from './locales.ts'
