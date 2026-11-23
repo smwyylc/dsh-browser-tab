@@ -6,7 +6,7 @@
  * stationary pointer. That fires the zone's `mouseleave` — the bar now covers
  * the pointer — while the bar's own `mouseenter` never fires, because the
  * pointer did not move. Without the DOM hit-test the bar retracted from under
- * the user's cursor 260ms after appearing, every time.
+ * the user's cursor shortly after appearing, every time.
  *
  * jsdom's `elementFromPoint` returns null, so every case stubs it: the DOM
  * question is the whole point of the fix and cannot be left to chance.
@@ -19,7 +19,7 @@ import { act, createElement, Fragment, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecentTabsController } from '../src/client/controller.ts'
-import { RecentTabs } from '../src/client/RecentTabs.tsx'
+import { RETRACT_MS, RecentTabs } from '../src/client/RecentTabs.tsx'
 import { FavoritesPanel } from '../src/client/FavoritesPanel.tsx'
 import { setFavoritesOpen } from '../src/client/fav-drawer-state.ts'
 import { STORAGE_KEY, type TabStorage } from '../src/client/store.ts'
@@ -206,7 +206,8 @@ describe('the bar stays under the pointer', () => {
     expect(isOpen()).toBe(true)
 
     act(() => { leaveZone() })
-    // Well past the 260ms: the pointer is on the bar, so nothing may retract.
+    // Well past the retract delay: the pointer is on the bar, so nothing may
+    // retract.
     act(() => { vi.advanceTimersByTime(1000) })
     expect(isOpen()).toBe(true)
   })
@@ -219,7 +220,7 @@ describe('the bar stays under the pointer', () => {
     expect(isOpen()).toBe(true)
 
     act(() => { leaveZone() })
-    act(() => { vi.advanceTimersByTime(260) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
     expect(isOpen()).toBe(false)
   })
 
@@ -243,7 +244,7 @@ describe('the bar stays under the pointer', () => {
     act(() => {
       bar().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
     })
-    act(() => { vi.advanceTimersByTime(260) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
     expect(isOpen()).toBe(false)
   })
 
@@ -257,7 +258,7 @@ describe('the bar stays under the pointer', () => {
     act(() => {
       bar().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
     })
-    act(() => { vi.advanceTimersByTime(260) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
     expect(isOpen()).toBe(false)
   })
 

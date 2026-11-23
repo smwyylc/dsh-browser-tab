@@ -93,6 +93,22 @@ const MENU_HEIGHT = 64
 const WHEEL_LINE_PX = 16
 
 /**
+ * How long the bar waits before retracting after the pointer leaves.
+ *
+ * Must exceed the `.bar` reveal transition (220ms, `recent-tabs.module.css`)
+ * by a clear margin: the zone's `mouseleave` fires while the bar is still
+ * sliding down over the pointer, and a retract scheduled then would land at
+ * roughly the moment the animation ends — the bar would steady itself and
+ * immediately vanish, which reads as "it flashed and went away". 260ms was
+ * 40ms past the transition and did exactly that; 420ms leaves the settle
+ * plus a real pause before anything moves.
+ *
+ * Exported so a test can advance the clock by the real delay instead of
+ * hard-coding a number that has to track the CSS.
+ */
+export const RETRACT_MS = 420
+
+/**
  * Convert one wheel delta axis into pixels.
  *
  * `deltaMode` names the UNIT the delta is counted in, not what it means: 0 is
@@ -150,7 +166,7 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   const hoverRef = useRef(false)
   /** The bar element itself: "is the pointer on the bar" is a DOM question. */
   const barRef = useRef<HTMLDivElement | null>(null)
-  /** Tracks the open -> closed edge, so the 260ms timer only restarts once. */
+  /** Tracks the open -> closed edge, so the retract timer only restarts once. */
   const drawerWasOpen = useRef(drawerOpen)
 
   useEffect(() => {
@@ -178,7 +194,7 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
    * pointer. That fires the zone's `mouseleave` — the bar now covers the
    * pointer — while the bar's own `mouseenter` never fires, because the
    * pointer did not move. Without this check the bar retracted from under
-   * the user's cursor 260ms after it appeared, every time.
+   * the user's cursor shortly after it appeared, every time.
    *
    * Only ever call this with a LIVE pointer position (a mouse event's
    * `clientX`/`clientY`). `elementFromPoint` answers "what is at this
@@ -207,6 +223,17 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
     menuOpenRef.current = menu !== undefined
   }, [menu])
 
+  /**
+   * How long the bar waits before retracting after the pointer leaves.
+   *
+   * Must exceed the `.bar` reveal transition (220ms, `recent-tabs.module.css`)
+   * by a clear margin: the zone's `mouseleave` fires while the bar is still
+   * sliding down over the pointer, and a retract scheduled then would land at
+   * roughly the moment the animation ends — the bar would steady itself and
+   * immediately vanish, which reads as "it flashed and went away". 260ms was
+   * 40ms past the transition and did exactly that; 420ms leaves the settle
+   * plus a real pause before anything moves.
+   */
   const scheduleHide = useCallback((): void => {
     clearHide()
     hide.current = setTimeout(() => {
@@ -215,12 +242,12 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
       // A drawer hangs off this bar: retracting would take its anchor with it.
       if (drawerOpenRef.current) return
       setOpen(false)
-    }, 260)
+    }, RETRACT_MS)
   }, [clearHide])
 
   // The bar carries both drawers' anchors, and a parked bar puts those anchors
   // above the viewport. So opening either drawer pulls the bar down and keeps
-  // it there; closing it hands the bar back to the ordinary 260ms timer.
+  // it there; closing it hands the bar back to the ordinary retract timer.
   useEffect(() => {
     if (drawerOpen) {
       drawerWasOpen.current = true

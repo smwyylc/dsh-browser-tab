@@ -12,7 +12,7 @@ import { act, createElement, Fragment, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecentTabsController } from '../src/client/controller.ts'
-import { RecentTabs } from '../src/client/RecentTabs.tsx'
+import { RETRACT_MS, RecentTabs } from '../src/client/RecentTabs.tsx'
 import { ClosedHistoryPanel } from '../src/client/ClosedHistoryPanel.tsx'
 import {
   isFavoritesOpen,
@@ -343,10 +343,10 @@ describe('closed history drawer', () => {
     expect(bar()?.getAttribute('data-open')).toBe('1')
 
     act(() => { setClosedHistoryOpen(false) })
-    // Still up immediately after the close: the retract is the 260ms timer.
+    // Still up immediately after the close: the retract is a real delay.
     expect(bar()?.getAttribute('data-open')).toBe('1')
 
-    act(() => { vi.advanceTimersByTime(300) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
     expect(bar()?.getAttribute('data-open')).toBe('0')
   })
 })

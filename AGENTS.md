@@ -122,9 +122,17 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   `conversation.session.header.utilities`，也不碰
   `conversation.session.header.corner`（single 槽位、`replaceRisk: shadows-shipped-ui`）。
   三处注册各自 `try`/`catch`，挂载失败只 warn。
+- **收回延迟必须大于揭示动画**：`.bar` 的揭示过渡是 220ms
+  （`recent-tabs.module.css` 的 `transition: transform 220ms …`），收回定时
+  `RETRACT_MS`（`RecentTabs.tsx`，导出给测试用）因此取 **420ms**——热区的
+  `mouseleave` 在条子还在往下滑时就触发，若定时只比动画长一点（早先是 260ms，
+  只多 40ms），收回会正好落在动画结束那一刻：条子刚稳住就消失，读作"闪一下就没了"。
+  改这个数要同时改 `tests/hover.spec.tsx` / `reorder.spec.tsx` /
+  `closed-history.spec.tsx` 里 `advanceTimersByTime` 的用例——它们已改为引用
+  `RETRACT_MS`，不要再写死毫秒数。抽屉开着/菜单开着时的提前 return 语义不变。
 - **抽屉开着时条子钉住**：条子关闭态是 `translateY(-100%)`，按钮矩形跑到视口上方，抽屉会被
   锚到屏幕外。`RecentTabs` 同时订阅 `fav-drawer-state` 与 `hist-drawer-state`，任一抽屉开着就
-  `data-open='1'` 且 hide 计时器直接 return；两个都关闭后才恢复原来的 260ms 计时。
+  `data-open='1'` 且 hide 计时器直接 return；两个都关闭后才恢复原来的 `RETRACT_MS` 计时。
   `FavoritesPanel.measure()` / `ClosedHistoryPanel.measure()` 各把自己的 `top` 夹到不小于 8px 兜底。
   改这条链路时四处一起改，否则抽屉会飞。
 - **抽屉贴按钮矩形定位**：两个抽屉各自找自己那颗按钮（`[data-dsh-part="favorite-button"]` /
@@ -159,15 +167,15 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   z-index 2147483001 高于 `.zone` 2147483000，所以 `show()` 让条子滑下来时会**盖住一个静止的
   指针**——热区的 `mouseleave` 立刻触发（指针此刻算在条子头上），而条子自己的 `mouseenter`
   **永远不触发**（`mouseenter` 只在指针真实跨边界时派发，元素移到指针下不算）。后果：条子
-  出现 260ms 后必然从用户手底下收走，跟指针快慢无关。修法：热区 `onMouseLeave` 里用
+  一出现就会从用户手底下收走，跟指针快慢无关。修法：热区 `onMouseLeave` 里用
   `document.elementFromPoint(event.clientX, event.clientY)` 看落点是不是条子
-  （`barRef.contains`），是就 `hoverRef = true` + `show()` 取消 hide；否则照旧排 260ms。
+  （`barRef.contains`），是就 `hoverRef = true` + `show()` 取消 hide；否则照旧排 `RETRACT_MS`。
   **只能用事件自带的实时坐标**——`elementFromPoint` 回答的是「这个坐标上有什么」而不是「指针
   在哪」，拿记住的旧坐标去问，条子还没收回时那个坐标上必然还是条子，会把每次收回都拦掉
   （2026-11-23 实测踩过：条子从此再不消失）。也**不要**在 `scheduleHide` 的定时器回调里做
   这种复查。`elementFromPoint` 可能不存在（jsdom 压根没实现，是属性缺失不是返回 null），
   先 `typeof === 'function'` 再调，缺了按「说不上来」退回旧行为。**不要**为了这个抬高
-  `.zone` 的 z-index（会吞掉条子的点击），也不要改 `.zone` 的 10px 高度或 260ms 这个数。
+  `.zone` 的 z-index（会吞掉条子的点击），也不要改 `.zone` 的 10px 高度。
   测试里必须 stub 掉 hit test，否则 jsdom 下每条用例都会静默走成「指针不在条子上」。
 - **条子的边框与投影只取轻一档**：`.bar` 保持「从屏幕顶缘挂下来」——`border-top: none`、只有底部
   `9px` 圆角、`padding: 6px 10px`（整条约 41px），不要改成四边带框的卡片。边线

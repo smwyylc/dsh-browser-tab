@@ -16,7 +16,7 @@ import { act, createElement, Fragment, type ReactElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { RecentTabsController } from '../src/client/controller.ts'
-import { RecentTabs } from '../src/client/RecentTabs.tsx'
+import { RETRACT_MS, RecentTabs } from '../src/client/RecentTabs.tsx'
 import { FavoritesPanel } from '../src/client/FavoritesPanel.tsx'
 import { setFavoritesOpen } from '../src/client/fav-drawer-state.ts'
 import { STORAGE_KEY, type TabStorage } from '../src/client/store.ts'
@@ -395,7 +395,7 @@ describe('strip tabs', () => {
     expect(tabByText('Alpha').querySelectorAll('[data-dsh-part="favorite-button"]')).toHaveLength(0)
   })
 
-  it('pins the bar on screen while the drawer is open, then resumes the 260ms hide', () => {
+  it('pins the bar on screen while the drawer is open, then resumes the retract', () => {
     setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
     // Only the plugin's own timer: React's scheduling stays real.
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
@@ -411,14 +411,14 @@ describe('strip tabs', () => {
     act(() => {
       bar().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
     })
-    act(() => { vi.advanceTimersByTime(400) })
+    act(() => { vi.advanceTimersByTime(1000) })
     expect(bar().getAttribute('data-open')).toBe('1')
 
     // Closing the drawer hands the bar back to the ordinary timer: still up
-    // right after the close, gone once the 260ms have run.
+    // right after the close, gone once the retract delay has run.
     act(() => { setFavoritesOpen(false) })
     expect(bar().getAttribute('data-open')).toBe('1')
-    act(() => { vi.advanceTimersByTime(260) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
     expect(bar().getAttribute('data-open')).toBe('0')
   })
 })
