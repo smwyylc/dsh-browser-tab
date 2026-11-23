@@ -150,8 +150,6 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   const hoverRef = useRef(false)
   /** The bar element itself: "is the pointer on the bar" is a DOM question. */
   const barRef = useRef<HTMLDivElement | null>(null)
-  /** Last pointer position seen on the zone or the bar, for the hide re-check. */
-  const pointerRef = useRef<{ x: number; y: number } | undefined>(undefined)
   /** Tracks the open -> closed edge, so the 260ms timer only restarts once. */
   const drawerWasOpen = useRef(drawerOpen)
 
@@ -180,10 +178,13 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
    * pointer. That fires the zone's `mouseleave` — the bar now covers the
    * pointer — while the bar's own `mouseenter` never fires, because the
    * pointer did not move. Without this check the bar retracted from under
-   * the user's cursor 260ms after it appeared, every time. Asking the DOM
-   * who is at that point is the only answer that tracks an element moving
-   * beneath a still pointer; a rectangle test cannot, because the bar is
-   * mid-transition.
+   * the user's cursor 260ms after it appeared, every time.
+   *
+   * Only ever call this with a LIVE pointer position (a mouse event's
+   * `clientX`/`clientY`). `elementFromPoint` answers "what is at this
+   * coordinate", not "where is the pointer", so a remembered coordinate
+   * asked later reports whatever still occupies it — the bar itself, while
+   * it is still on screen — and would block every retract.
    */
   const pointerOverBar = useCallback((x: number, y: number): boolean => {
     const bar = barRef.current
@@ -213,14 +214,9 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
       if (menuOpenRef.current) return
       // A drawer hangs off this bar: retracting would take its anchor with it.
       if (drawerOpenRef.current) return
-      // The bar may have moved under a still pointer, in which case no
-      // mouseenter ever fired and the pointer is sitting on the bar right
-      // now. Ask the DOM rather than trusting the event stream.
-      const point = pointerRef.current
-      if (point !== undefined && pointerOverBar(point.x, point.y)) return
       setOpen(false)
     }, 260)
-  }, [clearHide, pointerOverBar])
+  }, [clearHide])
 
   // The bar carries both drawers' anchors, and a parked bar puts those anchors
   // above the viewport. So opening either drawer pulls the bar down and keeps
@@ -593,16 +589,11 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
           The bar covers the band (higher z-index), so revealing it fires this
           leave while the pointer is really on the bar — and the bar's own
           mouseenter never fires, because the pointer did not move. Ask the DOM
-          where the pointer landed before deciding this is a departure. */}
+          where the pointer landed, at the pointer's own live position, before
+          deciding this is a departure. */}
       <div
         className={css.zone}
-        onMouseEnter={(event) => {
-          pointerRef.current = { x: event.clientX, y: event.clientY }
-          show()
-        }}
-        onMouseMove={(event) => {
-          pointerRef.current = { x: event.clientX, y: event.clientY }
-        }}
+        onMouseEnter={show}
         onMouseLeave={(event) => {
           if (pointerOverBar(event.clientX, event.clientY)) {
             hoverRef.current = true
@@ -622,9 +613,6 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
         onMouseEnter={() => {
           hoverRef.current = true
           show()
-        }}
-        onMouseMove={(event) => {
-          pointerRef.current = { x: event.clientX, y: event.clientY }
         }}
         onMouseLeave={() => {
           hoverRef.current = false

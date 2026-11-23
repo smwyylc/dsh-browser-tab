@@ -180,13 +180,6 @@ function enterZone(x = 400, y = 4): void {
   })
 }
 
-/** Move the pointer, so the bar knows where it last was. */
-function moveOnZone(x = 400, y = 4): void {
-  act(() => {
-    zone().dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x, clientY: y }))
-  })
-}
-
 /** Leave the hot strip, which is what the bar covering the pointer really is. */
 function leaveZone(x = 400, y = 4): void {
   act(() => {
@@ -211,7 +204,6 @@ describe('the bar stays under the pointer', () => {
     stubHitTest(bar())
     enterZone()
     expect(isOpen()).toBe(true)
-    moveOnZone()
 
     act(() => { leaveZone() })
     // Well past the 260ms: the pointer is on the bar, so nothing may retract.
@@ -225,33 +217,37 @@ describe('the bar stays under the pointer', () => {
     stubHitTest(null)
     enterZone()
     expect(isOpen()).toBe(true)
-    moveOnZone()
 
     act(() => { leaveZone() })
     act(() => { vi.advanceTimersByTime(260) })
     expect(isOpen()).toBe(false)
   })
 
-  it('skips a scheduled retract when the pointer turns out to be on the bar', () => {
+  it('still retracts once the pointer has genuinely left the bar', () => {
     setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
     usePluginTimers()
-    // The hide is scheduled while the pointer is genuinely elsewhere.
-    stubHitTest(null)
-    enterZone()
-    moveOnZone()
-    act(() => { leaveZone() })
-
-    // Before the timer runs, the bar ends up under the pointer.
+    // The bar first slides down over a still pointer, which is the case the
+    // hit test exists for.
     stubHitTest(bar())
-    act(() => { vi.advanceTimersByTime(260) })
+    enterZone()
     expect(isOpen()).toBe(true)
-
-    // And it stays: the timer is spent, not rescheduled into a loop.
+    act(() => { leaveZone() })
     act(() => { vi.advanceTimersByTime(1000) })
     expect(isOpen()).toBe(true)
+
+    // Now the pointer really leaves. The last hit test said "on the bar", and
+    // a remembered coordinate asked again would say so too — the bar is still
+    // on screen at that point — which is exactly why the retract must be
+    // driven by the leave event and not re-tested against a stale position.
+    stubHitTest(null)
+    act(() => {
+      bar().dispatchEvent(new MouseEvent('mouseout', { bubbles: true, relatedTarget: document.body }))
+    })
+    act(() => { vi.advanceTimersByTime(260) })
+    expect(isOpen()).toBe(false)
   })
 
-  it('still retracts when the hit test cannot say (elementFromPoint null)', () => {
+  it('retracts as before when the hit test cannot say (elementFromPoint null)', () => {
     setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
     usePluginTimers()
     // Reveal through the bar's own mouseenter rather than the zone, so the

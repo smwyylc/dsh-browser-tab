@@ -13,3 +13,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# 手工留下的构建产物备份，反复被 `git add lib` 误扫进提交
+*.bak-*
