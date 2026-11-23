@@ -1171,3 +1171,26 @@
     transition: none;
   }
 }
+
+/*
+ * Windows Electron reserves the top strip of the window for the caption: it is
+ * an `-webkit-app-region: drag` layer, and drag regions swallow pointer events,
+ * so a hot zone pinned to `top: 0` never fires there and the strip looks
+ * "missing" in the desktop app while working fine in a browser. Clear the
+ * caption height (`--dsh-windows-titlebar-height`, set by the desktop shell)
+ * and let the bar slide in from behind it instead of from the very top.
+ */
+html[data-windows-titlebar] .zone {
+  top: var(--dsh-windows-titlebar-height, 40px);
+  height: 14px;
+}
+
+html[data-windows-titlebar] .bar {
+  top: var(--dsh-windows-titlebar-height, 40px);
+  transform: translateX(-50%)
+    translateY(calc(-100% - var(--dsh-windows-titlebar-height, 40px)));
+}
+
+html[data-windows-titlebar] .bar[data-open='1'] {
+  transform: translateX(-50%) translateY(0);
+}
