@@ -14,7 +14,7 @@ one click away from being reopened.
 ## Behaviour
 
 - **Hover to reveal.** The strip is parked off-screen at the top edge. Move the
-  pointer into the top 10px band and it slides down; move away and it retracts
+  pointer into the top 12px band and it slides down; move away and it retracts
   after 546ms. It never covers the conversation while you are reading.
 - **Wide and centred.** The strip spans 90% of the viewport width, centred on
   the top edge, so a wide screen shows more tabs instead of the same narrow

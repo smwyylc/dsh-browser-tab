@@ -104,15 +104,18 @@
 }
 
 /*
- * Pure hot zone: full width, 10px tall, no background, no border. It only
- * reveals the bar, so it stays visually inert — the bar is above it.
+ * Pure hot zone: full width, 12px tall, no background, no border. It only
+ * reveals the bar, so it stays visually inert — the bar is above it. Taller
+ * than the original 10px on purpose: a thin band is easy to overshoot when
+ * the pointer races for the top of the screen, and the extra 2px gives the
+ * reveal a wider catch (2026-11-24, user request).
  */
 .zone {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  height: 10px;
+  height: 12px;
   z-index: 2147483000;
   pointer-events: auto;
 }
@@ -1182,7 +1185,7 @@
  */
 html[data-windows-titlebar] .zone {
   top: var(--dsh-windows-titlebar-height, 40px);
-  height: 14px;
+  height: 17px;
 }
 
 html[data-windows-titlebar] .bar {
