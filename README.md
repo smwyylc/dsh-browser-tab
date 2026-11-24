@@ -15,7 +15,7 @@ one click away from being reopened.
 
 - **Hover to reveal.** The strip is parked off-screen at the top edge. Move the
   pointer into the top 10px band and it slides down; move away and it retracts
-  after 260ms. It never covers the conversation while you are reading.
+  after 546ms. It never covers the conversation while you are reading.
 - **Wide and centred.** The strip spans 90% of the viewport width, centred on
   the top edge, so a wide screen shows more tabs instead of the same narrow
   column; the tab row scrolls inside it when they still do not fit.
@@ -66,7 +66,7 @@ one click away from being reopened.
   so it never runs to the bottom of the screen. While the drawer is open the
   strip stays on screen even if the pointer leaves it, because the strip holds
   the button the drawer is anchored to; close the drawer and the ordinary
-  260ms retract resumes. The drawer is anchored to the button's own rectangle,
+  546ms retract resumes. The drawer is anchored to the button's own rectangle,
   so a layout change that moves the button moves the drawer instead of leaving
   it behind. Escape, a click outside, or the button again closes it, and a
   closed drawer renders nothing at all.

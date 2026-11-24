@@ -122,12 +122,14 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   `conversation.session.header.utilities`，也不碰
   `conversation.session.header.corner`（single 槽位、`replaceRisk: shadows-shipped-ui`）。
   三处注册各自 `try`/`catch`，挂载失败只 warn。
-- **收回延迟必须大于揭示动画**：`.bar` 的揭示过渡是 220ms
-  （`recent-tabs.module.css` 的 `transition: transform 220ms …`），收回定时
-  `RETRACT_MS`（`RecentTabs.tsx`，导出给测试用）因此取 **420ms**——热区的
+- **收回延迟必须大于揭示动画，且给滑过头留缓冲**：`.bar` 的揭示过渡是 286ms
+  （`recent-tabs.module.css` 的 `transition: transform 286ms …`），收回定时
+  `RETRACT_MS`（`RecentTabs.tsx`，导出给测试用）因此取 **546ms**——热区的
   `mouseleave` 在条子还在往下滑时就触发，若定时只比动画长一点（早先是 260ms，
   只多 40ms），收回会正好落在动画结束那一刻：条子刚稳住就消失，读作"闪一下就没了"。
-  改这个数要同时改 `tests/hover.spec.tsx` / `reorder.spec.tsx` /
+  546ms 的另一半意义是给快速滑过头（越过热区上缘、落在标题栏上）的指针留出回来
+  取消收回的时间，否则条子刚弹出就收走、鼠标回来又要重新等弹出（2026-11-24 用户
+  反馈）。改这个数要同时改 `tests/hover.spec.tsx` / `reorder.spec.tsx` /
   `closed-history.spec.tsx` 里 `advanceTimersByTime` 的用例——它们已改为引用
   `RETRACT_MS`，不要再写死毫秒数。抽屉开着/菜单开着时的提前 return 语义不变。
 - **抽屉开着时条子钉住**：条子关闭态是 `translateY(-100%)`，按钮矩形跑到视口上方，抽屉会被

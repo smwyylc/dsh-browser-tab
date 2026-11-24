@@ -162,7 +162,7 @@
   /* Solid token fallback first; the elevation is mixed further down. */
   box-shadow: 0 2px 8px var(--dsw-alias-border-l1, #e5e5e5);
   overflow: hidden;
-  transition: transform 220ms cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 220ms ease;
+  transition: transform 286ms cubic-bezier(0.22, 0.61, 0.36, 1), box-shadow 286ms ease;
   font-size: 13px;
 }
 

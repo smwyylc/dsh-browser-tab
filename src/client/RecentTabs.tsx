@@ -95,18 +95,26 @@ const WHEEL_LINE_PX = 16
 /**
  * How long the bar waits before retracting after the pointer leaves.
  *
- * Must exceed the `.bar` reveal transition (220ms, `recent-tabs.module.css`)
+ * Must exceed the `.bar` reveal transition (286ms, `recent-tabs.module.css`)
  * by a clear margin: the zone's `mouseleave` fires while the bar is still
  * sliding down over the pointer, and a retract scheduled then would land at
  * roughly the moment the animation ends — the bar would steady itself and
  * immediately vanish, which reads as "it flashed and went away". 260ms was
- * 40ms past the transition and did exactly that; 420ms leaves the settle
+ * 40ms past the transition and did exactly that; 546ms leaves the settle
  * plus a real pause before anything moves.
+ *
+ * That pause doubles as a forgiveness window for overshoot: the reveal itself
+ * fires the moment the pointer enters the 10px zone, so a pointer travelling
+ * fast towards the very top of the screen can cross the zone's far edge and
+ * land on the caption area beyond it — a real departure, with the bar barely
+ * settled. The retract waits long enough that a pointer coming back down has
+ * time to re-enter the zone (or the bar) and cancel it, instead of watching
+ * the bar vanish and having to summon it again.
  *
  * Exported so a test can advance the clock by the real delay instead of
  * hard-coding a number that has to track the CSS.
  */
-export const RETRACT_MS = 420
+export const RETRACT_MS = 546
 
 /**
  * Convert one wheel delta axis into pixels.
@@ -226,12 +234,12 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   /**
    * How long the bar waits before retracting after the pointer leaves.
    *
-   * Must exceed the `.bar` reveal transition (220ms, `recent-tabs.module.css`)
+   * Must exceed the `.bar` reveal transition (286ms, `recent-tabs.module.css`)
    * by a clear margin: the zone's `mouseleave` fires while the bar is still
    * sliding down over the pointer, and a retract scheduled then would land at
    * roughly the moment the animation ends — the bar would steady itself and
    * immediately vanish, which reads as "it flashed and went away". 260ms was
-   * 40ms past the transition and did exactly that; 420ms leaves the settle
+   * 40ms past the transition and did exactly that; 546ms leaves the settle
    * plus a real pause before anything moves.
    */
   const scheduleHide = useCallback((): void => {
