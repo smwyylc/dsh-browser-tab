@@ -174,6 +174,8 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
   const hoverRef = useRef(false)
   /** The bar element itself: "is the pointer on the bar" is a DOM question. */
   const barRef = useRef<HTMLDivElement | null>(null)
+  /** The zone element: its top edge is where an overshoot becomes a departure. */
+  const zoneRef = useRef<HTMLDivElement | null>(null)
   /** Tracks the open -> closed edge, so the retract timer only restarts once. */
   const drawerWasOpen = useRef(drawerOpen)
 
@@ -628,10 +630,24 @@ export function RecentTabs({ controller, ctx }: { controller: RecentTabsControll
           deciding this is a departure. */}
       <div
         className={css.zone}
+        ref={zoneRef}
         onMouseEnter={show}
         onMouseLeave={(event) => {
           if (pointerOverBar(event.clientX, event.clientY)) {
             hoverRef.current = true
+            show()
+            return
+          }
+          // Overshoot: the pointer crossed the zone's FAR edge (into the
+          // window caption / browser chrome), not its near one. The zone is
+          // only a few pixels tall, so a pointer racing for the very top of
+          // the screen routinely sails past it; that is still "I am at the
+          // top edge", not "I left". Treat it as a non-departure: keep the
+          // bar up, and let the pointer coming back down re-enter the zone
+          // (or the bar) instead of watching the bar vanish and having to
+          // summon it again.
+          const zoneTop = zoneRef.current?.getBoundingClientRect().top ?? 0
+          if (event.clientY < zoneTop) {
             show()
             return
           }

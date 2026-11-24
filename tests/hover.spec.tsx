@@ -262,6 +262,40 @@ describe('the bar stays under the pointer', () => {
     expect(isOpen()).toBe(false)
   })
 
+  it('holds the bar up when the pointer overshoots the zone far edge', () => {
+    setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
+    usePluginTimers()
+    stubHitTest(null)
+    enterZone()
+    expect(isOpen()).toBe(true)
+
+    // A pointer racing for the very top sails past the zone's far edge (into
+    // the caption / browser chrome): that is "I am at the top", not "I left".
+    act(() => { leaveZone(400, -5) })
+    // Well past the retract delay: the overshoot must not schedule a retract.
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(isOpen()).toBe(true)
+  })
+
+  it('retracts once the pointer that overshot comes back down into the page', () => {
+    setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
+    usePluginTimers()
+    stubHitTest(null)
+    enterZone()
+    expect(isOpen()).toBe(true)
+
+    // Overshoot keeps the bar up...
+    act(() => { leaveZone(400, -5) })
+    act(() => { vi.advanceTimersByTime(1000) })
+    expect(isOpen()).toBe(true)
+
+    // ...and coming back down re-enters the zone, whose far edge is now below
+    // the pointer: a real departure, so the ordinary retract takes over.
+    act(() => { leaveZone(400, 30) })
+    act(() => { vi.advanceTimersByTime(RETRACT_MS) })
+    expect(isOpen()).toBe(false)
+  })
+
   it('leaves a drawer holding the bar up untouched', () => {
     setup({ s1: { title: 'Alpha', retainedBy: { mainView: 1 } } })
     usePluginTimers()

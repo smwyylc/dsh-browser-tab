@@ -179,6 +179,13 @@ DSH Web GUI 的「最近打开」会话 Tab 条（顶部悬浮、点击切换、
   先 `typeof === 'function'` 再调，缺了按「说不上来」退回旧行为。**不要**为了这个抬高
   `.zone` 的 z-index（会吞掉条子的点击），也不要改 `.zone` 的 10px 高度。
   测试里必须 stub 掉 hit test，否则 jsdom 下每条用例都会静默走成「指针不在条子上」。
+- **滑过头不算离开**：热区只有 10px（桌面版 14px）高，指针快速冲向屏幕顶时很容易越过热区
+  上缘滑进标题栏/浏览器 chrome——热区的 `mouseleave` 会照常触发，但 `event.clientY` 小于
+  热区上缘（`zoneRef` 的 `getBoundingClientRect().top`），说明指针不是往下离开而是往上过头。
+  此时**不要 scheduleHide**，直接 `show()` 保持条子：用户多半会把指针移回来，条子还在就不
+  用重新等弹出（2026-11-24 用户反馈）。只有指针真的越过热区**下缘**（`clientY > zoneTop`，
+  即往下进入页面）才排收回。改这条时同步 `tests/hover.spec.tsx` 的滑过头用例
+  （`leaveZone(400, -5)` 越上缘保持、`leaveZone(400, 30)` 越下缘收回）。
 - **条子的边框与投影只取轻一档**：`.bar` 保持「从屏幕顶缘挂下来」——`border-top: none`、只有底部
   `9px` 圆角、`padding: 6px 10px`（整条约 41px），不要改成四边带框的卡片。边线
   `1px solid var(--dsw-alias-border-l2, ...)`（l1 在浅色下死灰、深色下几乎消失），投影 blur ≤ 20px、
